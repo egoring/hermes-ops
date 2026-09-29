@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.DS_Store
+docs/변경이력.md
+scripts/pii_local.txt
+scripts/redact_local.txt
+scripts/public_subs_local.txt
+# 프로젝트 연결 정보는 로컬 전용 (양식만 공개)
+projects/*.md
+!projects/example.md
+reports/
