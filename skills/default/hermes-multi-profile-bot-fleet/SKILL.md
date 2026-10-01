@@ -47,8 +47,11 @@ Migrating (needs user approval — it SIGTERMs every bot gateway):
    `✓ discord connected (profile: <bot>)` per bot and the kanban dispatcher lock line;
    `launchctl list | grep hermes` shows only the host gateway (+ dashboard).
 
-Trade-offs to state when proposing it: no per-bot restart any more (`hermes -p <bot> gateway
-restart|stop|start` exits 78 — only `hermes gateway restart`, which reconnects all bots at once);
+Trade-offs to state when proposing it: `hermes gateway restart` reconnects all bots at once;
+`hermes -p <bot> gateway restart` now hot-unserves/re-serves ONE profile on the host ("Profile
+'<bot>' restarted by the host gateway", siblings stay connected) — use it for a single bot's
+Discord/config change; `stop` parks the profile (`start` unparks). Older builds exited 78 here;
+if so, fall back to the full restart;
 one crash takes down all bots (launchd relaunches); old chat threads lose continuity because
 secondary session keys become `agent:<profile>:…`; no one-command rollback
 (`gateway_migration.json` resumes a failed apply, it does not undo — reverting means
@@ -171,8 +174,21 @@ fresh process per run and need neither.
 
 ```bash
 hermes gateway restart                          # multiplexed: all bots
-hermes -p <bot> gateway restart                 # only with per-profile gateways
+hermes -p <bot> gateway restart                 # one bot (multiplexed host re-serves just it)
 ```
+
+The multiplex re-scan on a `config.yaml`/`.env` change only ADDS missing adapters — an
+already-connected bot keeps its old Discord gates (log: `Re-scanned profile '<bot>' … (0
+adapter(s) connected)`). After changing a connected bot's `discord.*` settings, run
+`hermes -p <bot> gateway restart` and confirm a fresh `✓ discord connected (profile: <bot>)`.
+Adapter-level settings (mention gating, allow_bots) then apply to existing threads too; SOUL does
+not (below).
+
+Applying a SOUL change to a thread that is already running: the session restores its stored
+system prompt every turn, and gateway `/compress` deliberately keeps that seeded prompt — it does
+NOT reload SOUL. Options to offer: (1) in the thread, "re-read `<SOUL path>` and follow rule X"
+(immediate, conversation-level, may fade in a long thread); (2) have it write a handoff note, then
+`/new` or a new thread (reliable). Recommend (2) for long-lived threads.
 
 Then prove it — compare the serving process's start time against file mtime, not just "the
 command printed OK". Same PID as before = not applied. `scripts/verify_fleet.sh` does this for
@@ -458,7 +474,16 @@ is dispatched as the reviewer — so "high only at review" already holds when th
 is high and the implementer medium. Recommend keeping design on high (spec defects are a real
 share of rejects and cost more loops than the effort saves) and cutting cost via model routing.
 
-A per-task effort (e.g. `xhigh` only for a user-requested final check) is possible: the kanban DB
+Final checks prefer a separate final-check bot on a different model (see Adding a bot to the
+fleet): the reviewer SOUL routes "최종점검" to it as a task with `--assignee <final-bot>
+--workspace dir:<project>` and NO `--model`/effort pin. Verify the route end to end on a throwaway
+board: a FRESH reviewer one-shot asked only "최종점검해줘" on data with one planted error must
+create the task for the final bot (`model_override`/`reasoning_effort` empty, zero
+`reasoning_effort_set` events), the worker session's `model` must be the final bot's, and the
+report must catch the planted error. Grep every SOUL/AGENTS and the ops docs for leftover
+"xhigh final check" and "decides with <model> outside Hermes" wording after switching.
+
+The per-task effort route below remains for other uses. A per-task effort is possible: the kanban DB
 has a `reasoning_effort` column, the dispatcher adds `--reasoning <v>` to every worker of that
 task, and it survives `unblock` — but the CLI and bot tools cannot set it. Call
 `hermes_cli.kanban_db.set_reasoning_effort` from a small script (the ops repo's
@@ -493,7 +518,8 @@ summarizing.
 ## Depth
 
 - `references/kanban-review-loop.md` — making implementer→reviewer handoff actually route.
-- `references/discord-bot-plumbing.md` — mentions, tokens, profile/account mapping.
+- `references/discord-bot-plumbing.md` — mentions, tokens, profile/account mapping, tagging a
+  second bot in another bot's thread (allow_bots / thread_require_mention).
 - `references/scheduled-alerts.md` — zero-token cron alerts, edge-triggered notification, the
   standard fleet automation set (kanban anomaly watch with evidence capture, daily
   `hermes backup`, weekly metrics post, effort change/apply watch) and how to test each before

@@ -68,6 +68,21 @@ returns the same account for every bot. Authoritative: the `/users/@me` lookup o
 token above, plus `✓ discord connected (profile: <bot>)` in `~/.hermes/logs/gateway.log` and
 `gateway_state.json` for liveness.
 
+## Tagging a second bot inside another bot's thread
+
+When the user asks "if I tag bot B in bot A's thread, will it answer?" — yes (the thread's
+parent channel is allowed), and B starts its OWN session for that thread. Check two per-profile
+gates in the adapter defaults before saying it just works:
+- `discord.allow_bots` defaults to `none`: B's history backfill (last ≤50 messages) DROPS every
+  other bot's message, so B sees only the user's lines — none of A's analysis or numbers. Set
+  `allow_bots: mentions` on B to include them as context (it still only responds to bots that
+  mention it).
+- `discord.thread_require_mention` defaults to `false`: once B has participated in a thread it
+  answers every later untagged message there too, so A and B both reply. Set it `true` on a bot
+  meant to be called on demand (e.g. a final-check bot) and leave the conversational bot as is.
+Both are adapter settings: apply with `hermes -p <bot> gateway restart` (a config re-scan does not
+rebuild a connected adapter); they then hold in existing threads as well.
+
 ## "Bot is typing" is not proof of token spend
 
 The typing indicator can linger as a client-side artifact after a turn ends. Decide from the
