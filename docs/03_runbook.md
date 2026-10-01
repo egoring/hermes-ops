@@ -104,7 +104,7 @@ EOF
 | kanban 이상 감시 | 30분 | `kanban_watch.py` | 새 crashed/잠금 만료 회수/gave_up/protocol_violation/block 루프, blocked 24시간+ (태스크당 1회). 크래시·회수는 `~/.hermes/kanban/incidents/`에 증거(payload + 워커 로그 200줄 + gateway ±3분) 저장 |
 | 일일 백업 | 매일 04:30 | `daily_backup.sh` | 성공 시 조용. 실패·디스크 여유 10GB 미만일 때만 멘션. `~/.hermes-backups/`에 최근 7개 (1개 약 200MB, 10초) |
 | 주간 지표 | 월 09:10 | `weekly_metrics.py` | 핵심 수치 + 지난주 대비. 원본 표는 `reports/weekly/<주차>.md` (로컬 전용) |
-| effort 변경·적용 | 5분 | `effort_watch.py` | 🎚 태스크 effort 지정(`reasoning_effort_set`), ⚙️ 프로필 기본 effort 변경(멘션), ✅ 봇 세션이 기본과 다른 effort로 실제 시작됨. 말로 요청한 최종점검이 xhigh로 돌았는지 확인용 |
+| effort 변경·적용 + 최종점검 | 5분 | `effort_watch.py` | 📋 fable-bot 최종점검 배정, 🧠 실행 시작, 🎚 태스크 effort 지정(`reasoning_effort_set`), ⚙️ 프로필 기본 effort 변경(멘션), ✅ 봇 세션이 기본과 다른 effort로 실제 시작됨. 말로 요청한 최종점검이 xhigh로 돌았는지 확인용 |
 | 리소스 감시 / 사용량 보고 | 09·21시 / 09시 | `resource_alert.py` / `usage_report.py` | 기존 |
 
 전송은 공용 `_notify.py`(helper-bot 계정, 알림 채널). 복원: `hermes import ~/.hermes-backups/<zip>`.
