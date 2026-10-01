@@ -73,7 +73,17 @@ hermes kanban show <task_id>    # body, comments, events, runs, latest summary
 ```
 
 CLI shape traps (they fail loudly but waste a round-trip each):
-- There is no global `--board` flag; switch with `hermes kanban boards switch <slug>`.
+- Target a board per command with the group-level flag placed **before** the subcommand:
+  `hermes kanban --board <slug> create|ls|show|request-review ...`. `create` itself has no
+  `--board` option, so `hermes kanban create --board x` fails. `boards switch <slug>` changes
+  the default for every later call (including other sessions) — prefer the explicit flag.
+- New project/competition → new board: `hermes kanban boards create <slug> --name ...`. Run
+  `hermes kanban boards set-default-workdir <slug> <abs dir>` yourself from the interactive
+  session once the folder exists. Worker contexts cannot run it; they are refused with
+  "cannot mutate Kanban tasks via the CLI". When
+  that first card creates the project folder itself, set its `--workspace dir:` to the
+  existing parent directory (so the parent AGENTS.md still loads) and put the new folder path
+  in the body; a `dir:` that does not exist yet is not a valid workspace.
 - `comment` and `block` take the text as a **positional** argument, not `--body`/`--reason`.
   Quote the whole body: `hermes kanban comment <id> "$(cat file.md)" --author <profile>`.
   **Give every card body its own uniquely-named file and re-read it after writing, before
@@ -89,7 +99,8 @@ CLI shape traps (they fail loudly but waste a round-trip each):
   backticks entirely. After posting a long instruction, re-read it with
   `hermes kanban show <id>` and confirm the paths survived.
 - `create --workspace` wants `dir:/abs/path` (or `scratch` / `worktree:<path>`).
-- `create` has no `--board`; attach the card with `--project <slug>`. An unknown flag makes the
+- `--project <slug>` links a card to a Hermes project (worktree anchoring); it is not a board
+  selector. An unknown flag makes the
   command print usage and exit **without creating anything**, so a pipeline that greps the
   output for an id silently yields an empty variable and every follow-up call then targets
   nothing. Create with `--json`, parse the id from that, and assert it is non-empty before
@@ -124,6 +135,14 @@ Every card body needs:
   baseline survives the card. State where a pristine baseline copy lives so scope can be
   checked with one `diff`.
 - **Forbid moving the goalposts**: report shortfalls as numbers, never relax the criterion.
+- **For public-facing text edits, ship the exact replacement sentences and an explicit
+  do-not-touch list.** Workers "improve" wording and replace every occurrence of a value;
+  name the lines to change, the look-alike occurrences to leave (e.g. measurement tables),
+  and make the diff hunk count a completion criterion.
+- **For remote-history rewrites (force push), require a backup and remote verification**:
+  `git bundle create <path> --all` before touching anything, `--force-with-lease`, then
+  `git ls-remote` sha == local HEAD and an API read-back of what the user will see. Tell the
+  user about the force push and the backup path when you hand the card off.
 
 ### 4. Resolve contradictions you introduce
 
@@ -149,11 +168,69 @@ does both. **Use `wake` when the user should hear one voice** — `notify+wake` 
 worker's raw summary and looks like the worker is answering directly. Re-running
 `notify-subscribe` on an existing subscription updates it in place.
 
+To watch another board's card from this thread, subscribe to it here. Remove it with
+`notify-unsubscribe <id> --platform <p> --chat-id <id> --thread-id <id>` once the
+dependency is gone. Otherwise its events keep landing in the wrong conversation.
+
+**Live progress in the chat for a long worker job.** "Can I watch it here" means periodic
+aggregates, not a stream. Stream the raw work only if it contains no restricted content
+and would not flood the thread; neither is usually true. Recipe:
+- The card makes the worker keep a `progress.json` with fixed field names: done/total,
+  batches, failures, ISO start and last-update times, running cost, per-category rates.
+  Post the field list as a card comment too.
+- Create a `cronjob_manage` job with `no_agent=true`, a script in the profile's `scripts/`,
+  `deliver=<platform>:<chat>:<thread>`, `failure_deliver=local`, every 30 min. The script
+  prints one summary line with an ETA. It prints nothing when unchanged or not started, and
+  warns **once** when progress stalls. Test it on a fake progress file first: fresh,
+  unchanged and stalled cases.
+- It costs no tokens and never sends restricted text (e.g. competition data).
+- **Respect the user's quiet hours (23:00–09:00 local).** No-agent alert scripts must not
+  print during that window. Route their output through a shared helper
+  (`scripts/quiet_hours.py` `emit(msgs, name)` in the profile). Overnight it appends to a
+  hold file and prints nothing. The first run after 09:00 prints "held overnight: N" and
+  then the held lines. Test it on 22/23/00/08/09 o'clock timestamps. Your own @-mentions
+  follow the same window: overnight wake-ups get a short reply with no tag. Tell the user
+  two things. Card-event wake-ups still post to the thread overnight; muting the thread to
+  mentions-only silences them. A held duplicate-GPU alert costs up to one session of
+  quota, so offer to exempt that single alert class.
+- Pause a progress cron once its job is finished (`hermes cron pause <id>`), and do not leave
+  it posting "no change".
+
+For your own "is it still running?" checks, keep one read-only status script in the
+profile's `scripts/`. It covers board `ls`, progress files, remote job status, and live
+worker pids per card. Run it with `bash <path>`. Long inline one-liners that chain many
+commands are rejected by the command parser, and a script is re-runnable anyway.
+
+### 5b. Pause and resume on the user's word
+
+"Pause this until X is done" → `block <id> "<reason + what exists + resume instructions>"
+--kind needs_input`, then confirm with `ps` that the worker process exited. If the user
+later says "wait for my approval", that **replaces** the automatic condition. Comment the
+change on the card, drop any cross-board subscription you added for the old trigger, and
+do not unblock when X finishes. On resume, first post a comment listing the artifacts that
+already exist and must not be regenerated (frozen folds, uploaded datasets). Then unblock.
+
+"Stop this" (for good) is not a pause.
+- `block` with the user's decision, the list of kept artifacts, and "do not resume".
+- `block` does not stop a live run. Kill the worker pid **and** any child process it
+  spawned, then confirm with `ps`.
+- Check the cards that depend on it. `hermes kanban unlink <parent> <child>` so they do not
+  wait forever, and comment what they must now mark "n/a".
+
 ### 6. Verify before relaying — worker summaries are claims, not results
 
 Never forward a worker's summary as fact. Reproduce the load-bearing numbers yourself from
 the artifacts, then report in your own words. See `references/verifying-worker-results.md`
 for the verification gates and the statistics trap that invalidates most benchmark verdicts.
+
+**Two reviewers, one decision.** A `request-review` also dispatches a separate reviewer run
+on the card while you may be reviewing it from the chat. If both of you make a design
+decision (a resolution, a threshold), they can disagree, and the child card starts on
+whichever one landed first. After the dispatched review completes, read its summary before
+you report. On a conflict, pick one by the scarce resource (GPU quota, deadline). Then
+comment the correction on any child card that already started, and check that nothing was
+pushed under the losing value. Tell the user plainly that the two reviews disagreed and
+which one you kept.
 
 State residual weakness even when every gate passes — a criterion cleared by a hair, or a
 confidence interval still spanning zero, belongs in the report next to the PASS.
@@ -231,37 +308,37 @@ handoff is how a wrong cause outlives the session that disproved it.
 
 ## Recovery
 
-- Stop a running card: `hermes kanban reclaim <id>` releases the claim.
-- **A worker block for a resource limit is usually a design defect in the card, not a
-  permissions question.** When a card stops on disk, quota, or rate limits, the worker asks
-  which resource it may consume; answering that question directly ("delete these directories")
-  authorises destruction of the user's data to keep a bad plan running. Re-scope the work
-  instead so the limit stops binding — stream and discard rather than accumulate, sample
-  rather than exhaust — then `comment` the new design and `unblock`. Ask what the card
-  actually needs to keep; it is often a tiny fraction of what it was collecting.
-  Deleting the user's accumulated artifacts is never the orchestrator's call to make on its
-  own, and never the orchestrator's hands either.
-- **Your own blocks count toward the card's failure limit.** Blocking to change instructions
-  is indistinguishable, to the dispatcher, from a worker failing repeatedly; enough of them
-  route a card whose work was fine into `triage` and make the board record it against the
-  assignee. To redirect a card that is *not* mid-run, edit it with `comment` and let the
-  dispatcher re-claim it — reserve `block` for genuinely halting work.
-- `reclaim` followed immediately by `block`, or a short `unblock`/`block` cycle, trips the
-  loop detector and dumps the card into `triage`.
-- **`triage` is a terminal-ish parking state with no path back.** `promote` rejects it
-  ("promote only applies to 'todo' or 'blocked'"), `unblock` rejects it ("not
-  blocked/scheduled"), and `complete` rejects it ("unknown id or terminal state"). The only
-  exit is `hermes kanban archive <id>`. When the deliverable is already produced and
-  verified, archive with a comment recording the verification and why the card ended up
-  there; do not fight the state machine to force a `done`.
-- A parent card blocked or in review keeps children in `todo`; completing or unlinking the
-  parent is what promotes them to `ready`.
-- Close a card that met its stated goal even if the outcome was disappointing. A spec that
-  was implemented faithfully but underperformed is a spec failure, not a worker failure, and
-  leaving it open records it against the wrong party. Put the performance question on a new card.
+Rules that apply every time a card misbehaves. Recipes and state-machine details are in
+`references/recovery.md`.
+
+- **A `crashed` run is not proof that the worker is dead.** Before you report a crash or
+  write retry instructions, run `ps -axo pid,ppid,etime,command | grep <task_id>` and
+  `kill -TERM` any stale run. Then read what each run already did (push, upload) from the
+  worker's `state.db` before you tell the user how many of anything exist.
+- **Headless workers cannot pass approvals.** Force pushes, protected files such as
+  `AGENTS.md`, and `pip install` all block. Design the card around that (draft + user `cp`,
+  local result + interactive push, numpy reimplementation). Never route around the security
+  scan.
+- **Scarce remote quota (GPU hours): guard on two layers.** Put a pre-push checklist comment
+  on every card and run a `no_agent` push watchdog cron. Cards that wait on a remote job use
+  short status calls, never long foreground wait loops.
+- **A resource-limit block is a card-design defect.** Re-scope so the limit stops binding;
+  never authorise deleting the user's data to keep a bad plan running.
+- **Your own blocks count toward the failure limit.** Redirect idle cards with `comment`,
+  not `block`. Avoid `reclaim`→`block` and quick `unblock`/`block` cycles; `triage` can only
+  be left through `archive`. A card in `triage` can also be picked up by the auto-decomposer
+  and re-promoted with a rewritten title and body. The worker then blocks again for the
+  same missing decision, and you get a second triage notification. Once a card lands in
+  `triage`, archive it with a comment that records its results and why it stopped. Carry
+  the work on in a new card that is created only after the user decides.
+- Close a card that met its stated goal even if the result disappointed; put the performance
+  question on a new card.
 
 ## References
 
+- `references/recovery.md` — headless approval workarounds, crashed-but-alive forensics and
+  the scarce-quota guard, resource-limit re-scoping, and dispatcher state-machine traps
+  (`triage`, failure limit, parent/child promotion).
 - `references/verifying-worker-results.md` — verification gates before relaying any worker
   summary, the sample-size trap, and designing acceptance criteria under noise.
 - `references/measuring-what-matters.md` — checking the benchmark maps to the real

@@ -17,11 +17,16 @@ Use this when the user asks whether a topology change saved CPU or memory, or wh
 
 ## The osascript wrapper
 
-`hermes_cli/gateway_launchd.py::launchd_program_arguments` wraps the launchd job in `/usr/bin/osascript -e 'do shell script "exec …"'`. This gives the gateway a macOS Local Network identity, so LAN connections are not refused with EHOSTUNREACH.
+`hermes_cli/gateway_launchd.py::launchd_program_arguments` wraps the launchd job in `/usr/bin/osascript` to give the gateway a macOS Local Network identity, so LAN connections are not refused with EHOSTUNREACH.
 
-The wrapper itself can use about 5% CPU continuously while the gateway idles at about 0.3%. Suspect it whenever the job PID is `osascript` and its CPU-time delta exceeds the gateway's.
+Two generations exist. Check which one the plist has: `plutil -extract ProgramArguments json -o - ~/Library/LaunchAgents/ai.hermes.gateway.plist`.
 
-### Removing the wrapper by hand
+- **Old: `osascript -e 'do shell script "exec …"'`.** It polls for user-cancel the whole time the child lives, so it burns about 3–5% CPU while the gateway idles at about 0.3%. Suspect it whenever the job PID is `osascript` and its CPU-time delta exceeds the gateway's.
+- **Current: `osascript -l JavaScript -e 'ObjC.import("stdlib"); … $.system(…)'` (JXA).** It measures 0.0% CPU. `hermes update` regenerates the plist with it.
+
+**The fix for the old wrapper is `hermes update`**: see the update procedure in SKILL.md, then re-measure with a 60 s CPU-time delta. Check first whether the fix is in the installed build (`git merge-base --is-ancestor <fix-sha> HEAD` in `~/.hermes/hermes-agent`).
+
+### Removing the wrapper by hand (only if updating is not possible)
 
 Only do this when no profile needs LAN endpoints, such as a local LLM `base_url` or LAN platform hosts. Check first with `grep -n base_url ~/.hermes/config.yaml ~/.hermes/profiles/*/config.yaml`.
 
@@ -40,7 +45,7 @@ Only do this when no profile needs LAN endpoints, such as a local LLM `base_url`
 - `hermes gateway status` keeps reporting the service definition as stale. That is expected here.
 - **Do not run `hermes gateway start` to clear the stale warning.** It regenerates the plist and puts the wrapper back. So do `hermes update` and `gateway install`. Re-measure after each and re-apply if needed.
 - LAN access from the gateway is blocked until the wrapper is restored from the backup.
-- Record the change as a temporary workaround in the fleet design doc's known-issues table. Offer an upstream issue draft with the measurement table; the fix belongs upstream as a config toggle.
+- Record the change as a temporary workaround in the fleet design doc's known-issues table, and drop the hand edit once an update ships the fixed wrapper.
 
 ## Whole-machine battery / CPU triage
 

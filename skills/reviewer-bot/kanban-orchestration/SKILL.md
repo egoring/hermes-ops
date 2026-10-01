@@ -61,7 +61,10 @@ finishes, reply in 1–3 lines: which job it was, that its numbers are already i
   creating it, so its completion comes back to you for re-verification instead of being relayed raw.
 - **Embed expected reproduction values** (exact means, per-seed deltas, counts) and say
   "if these don't reproduce, the implementation is wrong — stop and report". This turns
-  a self-report into a checkable claim.
+  a self-report into a checkable claim. Compute every embedded count with a real parser
+  (`csv` module, `json`), never `wc -l` or `awk -F,`: quoted fields holding commas or newlines
+  (e.g. a CLI `description` column) inflate line counts, and the worker then measures
+  against your wrong number.
 - **List already-rejected approaches by name** with a pointer to where they were rejected,
   so the worker doesn't re-propose them.
 - **Make "no improvement found" an explicitly valid outcome.** Without this, workers
@@ -156,7 +159,11 @@ Report per card: what finished, what is running and for how long, and the headli
 (e.g. how many games passed the fidelity check). Flag counts that look like a spec defect
 rather than a worker defect.
 
-**A card can close without you noticing.** A `request-review --reviewer <self>` spawns a separate
+**A card can close without you noticing.** Small cards (a figure script, a doc edit) finish within
+minutes. When the user cancels or changes their mind right after you dispatch, `kanban show` before
+replying: if the card is already done, say so, list the artifacts it left (and that nothing was
+published), and offer removal as a separate cleanup instead of claiming it was stopped.
+A `request-review --reviewer <self>` spawns a separate
 reviewer run of your own profile that may approve and complete the card on its own. Before
 telling the user a card is "still running" or summarising a build, `kanban show <id>` and read
 the run list and last events; if a reviewer run already completed it, re-read the result files it

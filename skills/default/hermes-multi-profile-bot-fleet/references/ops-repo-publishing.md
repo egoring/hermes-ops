@@ -60,7 +60,9 @@ task is `done`/`archived` run `notify-unsubscribe <task> --platform <p> --chat-i
    `git log -p --all` (expect only the author email line) and `git push --force` — force push
    rewrites remote history, so ask first. Old commits linger on GitHub only by hash.
 
-Gate every commit/push on the scan's own exit code (`sync_skills.py --check >/dev/null || exit 1`), never on `scan | tail -1 && git commit` — the pipe returns tail's 0 and a hit gets pushed. New scripts: use `#!/usr/bin/env python3` and re-exec into `~/.hermes/hermes-agent/venv` at runtime; an absolute shebang leaks `/Users/<name>`.
+New scripts: use `#!/usr/bin/env python3` and re-exec into `~/.hermes/hermes-agent/venv` at
+runtime; an absolute shebang leaks `/Users/<name>`. (Commit gating on the checker's exit code:
+see "Including skills and SOUL.md".)
 
 ## Going public (private → public)
 
@@ -126,7 +128,10 @@ broken refs, scripts run, README/LICENSE). Then:
    IDs, secrets, withheld phrases, check no local-only file is tracked, compile the scripts, and
    `diff -rq --exclude=.git <clone> <repo>` — the only differences must be the known local-only
    files (changelog, `projects/<real>.md`, deny/redact/subs lists) and `__pycache__`. Report it
-   as a table when the user asks "제대로 된 거 맞지?".
+   as a table when the user asks "제대로 된 거 맞지?". Grep for the project's DOMAIN
+   vocabulary too, not only its name: board names, game or domain nouns inside examples in
+   skills (e.g. a role word from the game), and domain terms in metric tables. Each new doc edit
+   can reintroduce a real board name, so re-run this after every change that touches docs.
 
 ## Filing upstream bug reports from ops findings
 
@@ -136,6 +141,14 @@ and Related links. Before filing, `gh search issues --repo NousResearch/hermes-a
 for duplicates and cite the related ones. Strip local `<!-- … -->` memo comments into a scratch
 body file, then `gh issue create --title "[Bug]: …" --body-file …`, confirm with `gh issue view`,
 and replace the draft's memo with the issue URL. Filing is the user's call.
+
+Follow-up: comment notifications arrive by email ("you authored the thread"). Check with
+`gh issue view <n> --comments` and `gh pr view <n> --json state,mergedAt`. When maintainers say
+it is fixed on main, verify locally (`git merge-base --is-ancestor <sha> HEAD` → not yet →
+update → re-measure). Then post one comment with before/after numbers, versions and thanks
+that names the people who triaged, and close it as completed. To add something to your own
+comment later, edit it (`gh api -X PATCH repos/<o>/<r>/issues/comments/<id> -F body=@file`)
+instead of posting a second one, so nobody gets notified again.
 
 ## Including skills and SOUL.md
 

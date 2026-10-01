@@ -47,14 +47,26 @@ for line in open(env_file):
         token = line.split("=", 1)[1].strip()   # keep overwriting: last wins
 ```
 
-## Confirm profile↔account mapping from the gateway log
+Cross-wired duplicates are common: each profile's FIRST token line can be a sibling bot's token
+(setup run in the wrong profile, then re-run). Clean up only after auditing:
+1. Per profile, hash every `DISCORD_BOT_TOKEN` line (`sha256(...)[:8]`, never print values) and
+   compare the LAST hash across profiles — overlap means two profiles log in as one account.
+2. Resolve each distinct hash to its account with `GET /api/v10/users/@me` (`Authorization: Bot
+   <token>`) and check it matches the profile's role.
+3. Back up `.env` → `.env.bak_<ts>_dedupe` (chmod 600 — it still holds every token), keep only
+   the last line, and re-hash: last-line hash before == after means the gateway keeps its
+   connection (no reconnect, no restart). Confirm `gateway_state.json` still shows each
+   `<profile>:discord` connected and one helper-script send succeeds.
+When a new token lands, also hash-compare it against any token that was pasted in chat — equal
+means the user did not reset it.
 
-Do not infer which bot account a profile runs as by grepping its `.env` — duplicate keys make
-that unreliable. The authoritative record is the connection line:
+## Confirm profile↔account mapping
 
-```bash
-grep -o "Connected as [^ ]*" ~/.hermes/profiles/<bot>/logs/gateway.log | tail -1
-```
+Do not infer the account from a grep of `.env` (duplicates) or from `Connected as` log lines:
+under a multiplexed gateway those lines are old and carry no profile name, so a per-profile grep
+returns the same account for every bot. Authoritative: the `/users/@me` lookup on the last-line
+token above, plus `✓ discord connected (profile: <bot>)` in `~/.hermes/logs/gateway.log` and
+`gateway_state.json` for liveness.
 
 ## "Bot is typing" is not proof of token spend
 

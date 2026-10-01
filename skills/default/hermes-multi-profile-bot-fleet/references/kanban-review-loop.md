@@ -115,12 +115,31 @@ project AGENTS.md (its own section) and both the reviewer's and implementer's SO
 | coder implementation/analysis | none (profile model) |
 | reviewer design/review | none |
 | non-design work the reviewer assigned to itself (docs, collection, re-measure) | the mid model — or better, assign it to the implementer |
-| mechanical work that ends in `kanban_complete` with no review (move/delete, reformat) | the cheap model — never on a task that goes through `request-review`, or the review runs on the cheap model |
+| mechanical work that ends in `kanban_complete` with no review (move/archive, reformat, list, log summary) | assign to the cheap **helper bot** instead of pinning the cheap model on another bot — its own SOUL then applies. Give the helper SOUL a "kanban chores assigned to you" clause (do it even if it touches files; no program logic; `kanban_complete`, never `request-review`; `kanban_block` if it needs judgment), since a generic "hand off anything touching files" line makes it refuse. Never route reviewed work to it — the review would run on the cheap model |
 | implementer task needing heavy reasoning | the premium model (review stays premium too) |
 | output feeds a numeric decision | none |
 
 Don't drop the mid model from the table because it is "the default" — the designer's own
 non-design tasks otherwise run on the premium model.
+
+Test a routing change on a throwaway board before relying on it:
+`hermes kanban boards create <tmp> --default-workdir <scratch dir>`, then one real task with
+`--workspace dir:<scratch dir>` and the new assignee. Poll the status, check the files and the
+worker's model (`sessions.model` in that profile's state.db), then `hermes kanban boards rm <tmp>`
+(it archives, recoverably). The live dispatcher claims `ready` tasks within seconds, so create
+any task you do not want run with `--initial-status blocked`.
+
+## Recurring-defect checklist in the project AGENTS.md
+
+When rejects keep citing the same analysis mistakes, turn them into a short "self-check before
+implementing" list in the project AGENTS.md review section instead of a new gate script. Build
+it from the `changes_requested` texts, not from memory. Let the designer bot draft it into
+`docs/` as a kanban task (workspace = project dir, no AGENTS.md edits, `kanban_complete`,
+user approval) and have it confirm each claimed helper path exists. Drafts regularly find that
+a helper named in a handoff note does not do what the note says. Keep about six items, each
+with example task ids and the helper path, and require a "n/a / done" line per item in every
+review request. Demote writing-quality defects (prose contradicting a table, unreproducible
+derived numbers) to one-line 🔴 examples; a long list gets skimmed and weakens the core items.
 
 ## Report honestly when the numbers are bad
 

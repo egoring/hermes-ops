@@ -29,6 +29,24 @@ grep -c "app.asar\|TRANSPARENT_WINDOWS" /tmp/dash.html   # expect 0
 
 A non-zero count on the second grep means the Electron bundle is being served.
 
+## Watching fleet work live
+
+When the user wants to "see progress live", point at what already exists before building anything:
+
+| Surface | Shows | Live? |
+|---|---|---|
+| Dashboard **Kanban** tab (`http://127.0.0.1:9119`, launchd `ai.hermes.dashboard`) | every board's cards, who runs what, comments, runs, worker log | cards/events live (the kanban plugin tails `task_events` over its `/events` WebSocket); the worker-log pane loads once with a refresh button |
+| `hermes kanban watch --interval 2` | event stream across boards (create/claim/review/complete/crash) | live |
+| `hermes kanban --board <b> tail <task_id>` | one worker's tool calls and output | live (tail -f); `log <id> --tail N` for a snapshot |
+| The Discord thread itself | tool-call progress bubbles | live when `display.tool_progress` is non-`off` |
+
+For this user (Ghostty + tmux) recommend a split: `tmux new-session -d -s kb 'hermes kanban watch
+--interval 2' \; split-window -h 'hermes kanban --board <b> tail <id>' \; attach -t kb`. The
+dashboard binds 127.0.0.1 — viewing it from a phone needs a tunnel with its own auth; recommend the
+Discord app instead. Find the running task with `sqlite3 <board>/kanban.db "select id from tasks
+where status='running'"`. When testing `watch` non-interactively, bound it with
+`perl -e 'alarm 10; exec @ARGV' hermes kanban watch …` (no `timeout` on macOS; `&` is rejected).
+
 ## Autostart via launchd
 
 A dashboard started by hand dies with its shell. For a persistent one, model the LaunchAgent on

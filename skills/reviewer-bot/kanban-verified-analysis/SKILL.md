@@ -127,6 +127,20 @@ file — and generalising it to the whole system. Before spending a card on your
 state what would falsify it and check that cheaply against the full data you already hold. A
 card is the expensive way to discover you were looking at a slice.
 
+A large disagreement with the incumbent on unlabeled data is itself the cheap falsification
+check, and it must gate spend. A new pseudo-label source whose prevalence was a third of the
+incumbent's on key targets (e.g. 20% vs 60%) and whose binary agreement was 0.83 (incumbent
+sources agreed 0.95 with each other) went on to lose −0.107 macro AUC on the gold set after
+$55 of labelling. The cause was a definition choice in the prompt (strict severity thresholds
+mapped borderline findings to the same score as clean negatives, erasing rank information for
+an AUC metric). Before a full run, pilot ~100 items and stop if prevalence or agreement is far
+from the incumbent without an independent reason to believe the incumbent is wrong; for AUC
+targets, never collapse graded evidence (mild/small/low-grade) into the clean-negative bucket.
+
+Bulk LLM labelling (pilot gate, session-length limits against compaction drift, blind
+relabels, drift detection by position, one-shot gold evaluation) is covered in
+`references/llm-labelling-workers.md`.
+
 This matters for reporting too: name your own overturned calls as explicitly as the worker's.
 A verification log that only ever catches the worker is not measuring itself.
 
@@ -148,8 +162,22 @@ A verification log that only ever catches the worker is not measuring itself.
 - **Blocking a card twice trips `failure_limit` → the card routes to `triage`, where
   `unblock`/`complete`/`promote` are all refused.** Only `archive` gets it out. Inject course
   corrections as **`hermes kanban comment`**, never as a block.
+  - A worker blocking at a pre-registered gate the user must decide on is correct
+    behaviour, but it still counts toward the limit. Write gates that need a user decision
+    as "comment the result and stop" rather than "block", or expect triage.
+  - Once a card is in triage, the auto-decomposer can rewrite its title/body and promote it
+    again. The worker, seeing no new decision, blocks again, and the loop repeats with
+    another notification. Archive the triaged card promptly: comment what it produced,
+    then archive. Carry the user's decision into a **new** card whose body records it as
+    `사용자 결정(override): ...`, so the worker executes instead of re-asking.
 - `hermes kanban comment <id> "text"` takes the body positionally — there is no `--body` flag
-  (unlike `create`). Long bodies: write to a temp file and `"$(cat file)"`.
+  (unlike `create`). For any body containing backticks, `$`, parentheses or quotes, **always**
+  write it to a file first and pass `"$(cat file)"`. Inline double-quoted text gets
+  command-substituted by the shell, which posts a half-garbled instruction the worker may
+  act on. If that happens, post a full corrected comment at once and mark it as superseding.
+- When a decision lands on a card that is in `blocked` (the user picks an option),
+  comment the decision first and then `unblock`. Unblocking first lets the dispatcher spawn
+  a worker that reads the old comments and blocks again.
 - `--board` is not a global flag; switch with `hermes kanban boards switch <slug>`.
 - Subscribe notifications with `notify-subscribe --delivery-mode wake` so the orchestrator is
   woken to verify and summarize, instead of worker text being pushed to the user raw.
