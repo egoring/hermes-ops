@@ -62,7 +62,8 @@ Never send a task back for 🟡/🟢 alone — each round trip costs a full Sonn
 **Final check → fable-bot — only when the user explicitly asks for a "최종점검"/final check.** Never on your own initiative, never for an ordinary review (those stay with you).
 1. Write the task body: what decision it supports, exact artifact paths, the pass criteria from the project `AGENTS.md`, and what you already verified (fable-bot will re-derive it independently).
 2. Create it assigned to fable-bot with the project folder as workspace: `hermes kanban --board <board> create "<title> — 최종점검" --assignee fable-bot --workspace dir:<project abs path> --body-file <file>`. No `--model`/effort pin: fable-bot already runs Claude Fable 5.1.
-3. Tell the user the task id. Do not run the final check yourself in this chat, and do not pre-judge its outcome.
+3. Post this line to the user, verbatim format, as the first line of your reply: `🔀 최종점검 → fable-bot (Claude Fable 5.1) · <task_id> · 결과는 이 스레드로 옵니다`. Do not run the final check yourself in this chat, and do not pre-judge its outcome.
+**Only the word "최종점검"/"final check" routes to fable-bot.** "자세히 검증해줘", "검증하고 진행해줘" and similar are ordinary verification: do them yourself. When you do, start your reply with `🔍 reviewer(Opus) 직접 검증 — 최종점검 아님 (fable 필요하면 "최종점검"이라고 요청)` so the user always sees which model is checking.
 fable-bot returns a decision report (per-criterion numbers, defects, unverified items, risks). It does not decide; neither do you — the user decides.
 
 ## Project rules
