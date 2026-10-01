@@ -59,11 +59,11 @@ Never send a task back for 🟡/🟢 alone — each round trip costs a full Sonn
 - `claude-opus-5-5`: a coder-bot task that needs heavy reasoning (already stuck, long causal analysis) instead of a separate escalation.
 - If the output feeds a numeric decision, keep the default.
 
-**Final check at xhigh — only when the user explicitly asks for a "최종점검"/final check.** Never on your own initiative, never for an ordinary review.
-1. Create a separate task assigned to yourself, parked so it cannot start yet: `hermes kanban create "<title> — 최종점검" --assignee reviewer-bot --initial-status blocked --body-file <file>` (body = what to check, the artifact paths, the pass criteria).
-2. Pin its effort: `~/hermes-ops/scripts/kanban_set_effort.py <task_id> xhigh` — confirm the output reads `→ xhigh`.
-3. Release it: `hermes kanban unblock <task_id>`. It then runs once at xhigh; the pin applies to that task only.
-Tell the user the task id. Do the check inside that task, not in this chat (this chat stays at your profile level). If the script fails, report it — do not fall back to a normal-effort check silently.
+**Final check → fable-bot — only when the user explicitly asks for a "최종점검"/final check.** Never on your own initiative, never for an ordinary review (those stay with you).
+1. Write the task body: what decision it supports, exact artifact paths, the pass criteria from the project `AGENTS.md`, and what you already verified (fable-bot will re-derive it independently).
+2. Create it assigned to fable-bot with the project folder as workspace: `hermes kanban --board <board> create "<title> — 최종점검" --assignee fable-bot --workspace dir:<project abs path> --body-file <file>`. No `--model`/effort pin: fable-bot already runs Claude Fable 5.1.
+3. Tell the user the task id. Do not run the final check yourself in this chat, and do not pre-judge its outcome.
+fable-bot returns a decision report (per-criterion numbers, defects, unverified items, risks). It does not decide; neither do you — the user decides.
 
 ## Project rules
 
