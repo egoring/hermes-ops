@@ -38,7 +38,7 @@ PII = re.compile(
     re.I,
 )
 # SOUL.md: 복사할 때 개인 ID를 자리표시자로 바꾼다 (원본은 그대로)
-SOULS = ["reviewer-bot", "coder-bot", "helper-bot"]
+SOULS = ["reviewer-bot", "coder-bot", "helper-bot", "fable-bot"]
 SOUL_DEST = REPO / "souls"
 _REDACT_LOCAL = Path(__file__).with_name("redact_local.txt")  # "원문<TAB>치환" 한 줄씩, git 제외
 
