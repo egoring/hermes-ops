@@ -1,8 +1,8 @@
 # hermes-ops
 
-[Hermes Agent](https://github.com/NousResearch/hermes-agent) 하나로 Discord 봇 3개(설계·리뷰 / 구현 / 보조)를 역할별 모델로 돌리고, kanban 보드로 "설계 → 구현 → 리뷰" 왕복을 자동화한 개인 운영 기록이다. 프로젝트와 무관한 운영 구조만 여기 둔다.
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) 하나로 Discord 봇 4개(설계·리뷰 / 구현 / 보조 / 최종점검)를 역할별 모델로 돌리고, kanban 보드로 "설계 → 구현 → 리뷰" 왕복을 자동화한 개인 운영 기록이다. 프로젝트와 무관한 운영 구조만 여기 둔다.
 
-> Personal ops notes (Korean) for running three role-split Hermes Agent Discord bots — Opus for design/review, Sonnet for implementation, Haiku for light work — sharing one multiplexed gateway, with a kanban design→implement→review loop. Includes the SOUL.md role prompts, the custom skills the bots accumulated, a kanban metrics script, and upstream bug reports found along the way.
+> Personal ops notes (Korean) for running four role-split Hermes Agent Discord bots — Opus for design/review, Sonnet for implementation, Haiku for light work, Fable for independent final checks — sharing one multiplexed gateway, with a kanban design→implement→review loop. Includes the SOUL.md role prompts, the custom skills the bots accumulated, a kanban metrics script, and upstream bug reports found along the way.
 
 **그대로 쓰는 템플릿이 아니다.** 설정값·수치는 2026-09 기준 한 사람의 환경(macOS, Hermes v0.21.4)에서 확인한 것이다. 가져다 쓸 땐 `docs/01_운영구조.md`의 구조와 `docs/05_결정기록.md`의 이유를 보고 자기 환경에서 다시 확인할 것.
 
@@ -12,6 +12,7 @@
 | 왜 이렇게 했나 | `docs/05_결정기록.md` |
 | 실제로 무슨 문제가 있었나 | `docs/06_이슈.md`, `docs/04_운영지표.md` §3 |
 | 봇 역할 프롬프트 | `souls/` |
+| 최종점검 (fable-bot) | `docs/07_최종점검.md` |
 
 | 문서 | 내용 | 언제 보나 |
 |---|---|---|
@@ -21,12 +22,13 @@
 | `docs/04_운영지표.md` | 지표 정의, 기준선, 기록표 | 주간 점검 |
 | `docs/05_결정기록.md` | 왜 이 구조인가 (D1~) | 구조를 바꾸고 싶을 때 |
 | `docs/06_이슈.md` | 미해결 이슈 | 점검·장애 |
+| `docs/07_최종점검.md` | 최종점검을 fable-bot(Fable 5.1)이 맡는 구조, 흐름, 보고서 형식, 검증 | 제출·배포 전 |
 | `projects/example.md` | 프로젝트 연결 정보 양식. 실제 `projects/<이름>.md`는 **로컬 전용** (`.gitignore`) | 프로젝트 추가 |
 | `issue_drafts/` | Hermes upstream 제보 원문 (#127651, #127652 제출됨) | 제보할 때 |
-| `scripts/kanban_set_effort.py` | 태스크 하나의 추론 강도 지정/해제 (CLI에 없는 기능) | 최종 점검을 xhigh로 |
+| `scripts/kanban_set_effort.py` | 태스크 하나의 추론 강도 지정/해제 (CLI에 없는 기능) | 특정 태스크 추론 강도 조정 (최종점검은 fable-bot으로 이전) |
 | `scripts/kanban_metrics.py` | 보드 지표 (읽기 전용) | `python3 scripts/kanban_metrics.py --days 7` |
 | `skills/` | 운영용 자작 스킬 스냅샷 (원본은 `~/.hermes`) | 백업·다른 PC 이전 |
-| `souls/` | 봇 3개 SOUL.md 스냅샷 (개인 ID는 자리표시자로 치환) | 역할 규칙 원문 확인 |
+| `souls/` | 봇 4개 SOUL.md 스냅샷 (개인 ID는 자리표시자로 치환) | 역할 규칙 원문 확인 |
 | `scripts/sync_skills.py` | 스킬·SOUL 복사 + ID 치환 + 공개 보류 처리 + 저장소 전체 개인정보 검사 | 스킬이 바뀐 뒤 커밋 전 |
 
 ## 스킬·SOUL 동기화
