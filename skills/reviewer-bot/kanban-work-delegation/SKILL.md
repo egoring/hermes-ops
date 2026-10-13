@@ -84,7 +84,8 @@ CLI shape traps (they fail loudly but waste a round-trip each):
   that first card creates the project folder itself, set its `--workspace dir:` to the
   existing parent directory (so the parent AGENTS.md still loads) and put the new folder path
   in the body; a `dir:` that does not exist yet is not a valid workspace.
-- `comment` and `block` take the text as a **positional** argument, not `--body`/`--reason`.
+- `comment`, `block` and `request-changes` take the text as a **positional** argument, not
+  `--body`/`--reason` (`request-changes <id> "<reason>"`).
   Quote the whole body: `hermes kanban comment <id> "$(cat file.md)" --author <profile>`.
   **Give every card body its own uniquely-named file and re-read it after writing, before
   creating the card.** A generic scratch path (`/tmp/card.md`, `/tmp/body.md`) reused across
@@ -105,6 +106,16 @@ CLI shape traps (they fail loudly but waste a round-trip each):
   output for an id silently yields an empty variable and every follow-up call then targets
   nothing. Create with `--json`, parse the id from that, and assert it is non-empty before
   chaining `notify-subscribe` or any other command onto it.
+- **Chain cards that touch the same file with `--parent`** (doc-record card → card A →
+  card B) so they run in order instead of racing on one work log. Create in dependency order,
+  parse each id from `--json`, and substitute it into later bodies (e.g. `sed` a placeholder
+  in the next body file, then `grep` that the id landed) before creating them.
+- **A card that must wait for the user's approval is created blocked, not chained and
+  blocked later**: `create ... --parent <prev> --initial-status blocked --json`, then
+  comment the user's gate condition ("start only after the user reviews A/B results").
+  `block` on a `todo` card is refused ("cannot block"), and a plain `--parent` chain
+  auto-promotes the card the moment the parent completes. If one was already created
+  unblocked, archive it before it starts, recreate it blocked, and move the subscription.
 - The subcommand is `notify-subscribe`, not `subscribe`, and it wants `--platform` plus
   `--chat-id` / `--thread-id` as separate flags — a bare `--chat` is rejected as ambiguous.
 
@@ -135,6 +146,26 @@ Every card body needs:
   baseline survives the card. State where a pristine baseline copy lives so scope can be
   checked with one `diff`.
 - **Forbid moving the goalposts**: report shortfalls as numbers, never relax the criterion.
+  The same applies to you: when a fix card re-implements a decision rule the user already
+  approved (a verdict function, a gate), copy that rule verbatim. Adding a condition while
+  "tidying" it changes the verdict the run prints, and you then have to explain why the
+  printed verdict disagrees with the approved rule.
+- **State git expectations as two explicit yes/no lines** ("local commit: YES, message
+  `<msg>`; push: NO") and put `git status` empty + the commit hash in the completion
+  criteria. "Commit locally, push forbidden" written as one phrase gets read as "no git",
+  and the round trip costs a full review cycle.
+- **Size every absolute threshold to the sample before writing it.** A floor like "Hit@5 ≥
+  0.70" on n≈50 is inside the binomial noise of a result a few items short; prefer a paired
+  criterion against the previous version or baseline, or write the floor with its CI. A
+  floor missed only by noise is a spec defect: approve the faithful implementation, record
+  the miss, and raise the threshold question to the user instead of bouncing the worker.
+- **Compute a metric's no-op and oracle values before writing a delta threshold on it,
+  and check that criteria can all hold at once.** A similarity score where "do nothing"
+  already reaches 0.96 cannot rise by 0.05; a success floor plus a per-item step cap can be
+  jointly unreachable on the real size distribution. Ask the card to print both reference
+  values first. When the worker flags such a conflict at review, decide each flagged item in
+  the approval comment (replacement metric or criterion, with its numbers) so the next card
+  inherits the corrected rule, rather than bouncing a faithful implementation.
 - **For public-facing text edits, ship the exact replacement sentences and an explicit
   do-not-touch list.** Workers "improve" wording and replace every occurrence of a value;
   name the lines to change, the look-alike occurrences to leave (e.g. measurement tables),
@@ -143,6 +174,13 @@ Every card body needs:
   `git bundle create <path> --all` before touching anything, `--force-with-lease`, then
   `git ls-remote` sha == local HEAD and an API read-back of what the user will see. Tell the
   user about the force push and the backup path when you hand the card off.
+- **For any push card, anchor to the remote as fetched at run time, not a SHA from the chat.**
+  The user edits public repos on the web between cards. A card that hard-codes the base SHA,
+  the original line text, or an absolute commit count gets a non-fast-forward rejection.
+  Make the card `git fetch` and rebase onto `origin/<branch>`. Treat the user's web commit as
+  intentional: keep it and resolve conflicts in its favour. Write the criteria relative to
+  that head ("diff since origin/master = these files only", "origin/master is an ancestor of
+  HEAD"), not as total commit counts.
 
 ### 4. Resolve contradictions you introduce
 
@@ -193,8 +231,28 @@ and would not flood the thread; neither is usually true. Recipe:
   two things. Card-event wake-ups still post to the thread overnight; muting the thread to
   mentions-only silences them. A held duplicate-GPU alert costs up to one session of
   quota, so offer to exempt that single alert class.
+- `hermes cron create --script` takes a script name only, with no arguments. To reuse a
+  parameterised watcher (slug, state file, label, warn hours), have the card add a small
+  wrapper script in the profile's `scripts/`. The wrapper imports the watcher's `check()`,
+  calls it with fixed arguments, and prints through `emit()`. Before you register it, test
+  it with a fake `status_fn` and a temporary state file. Then run it once for real: while
+  the job is still running it must print nothing.
 - Pause a progress cron once its job is finished (`hermes cron pause <id>`), and do not leave
   it posting "no change".
+
+**Before quoting an ETA, read the live process, not the output folder.** Take `ps` for the
+running command (flags such as `--fresh` mean the worker restarted from zero), and take the
+progress line of the log it writes (`[k/N]`). Then compute the rate from two timestamps.
+A records folder left by an earlier pass can be nearly full while a fresh rerun is at 7%.
+"Done in 10 minutes" read off that folder turned into a 5-hour run, and the estimate had
+to be withdrawn. If you can't tell why the worker restarted, say so; don't guess a reason.
+
+**"Is this overloading the machine?" — answer with four readings and the end time.** Give
+load average against the core count, `memory_pressure` free %, `docker stats` per
+container (CPU, memory against its cap), and `pmset -g therm` and power state. Add the
+time the job ends, since the load stops then. List stale containers you see (days old,
+0% CPU) as cleanup for a card, not something to delete yourself. Give the one knob the
+user can turn (concurrency) and what it costs in time.
 
 For your own "is it still running?" checks, keep one read-only status script in the
 profile's `scripts/`. It covers board `ls`, progress files, remote job status, and live
@@ -209,6 +267,18 @@ later says "wait for my approval", that **replaces** the automatic condition. Co
 change on the card, drop any cross-board subscription you added for the old trigger, and
 do not unblock when X finishes. On resume, first post a comment listing the artifacts that
 already exist and must not be regenerated (frozen folds, uploaded datasets). Then unblock.
+
+**"Fix it, then final-check, then proceed" means the fix card stops before the side effect.**
+When a fix card also performs the irreversible step (push a GPU run, submit, publish), the
+user's "check first" request arrives after it already happened. Split it: fix + CPU proof
+in one card, the push/launch in a separate step gated on the check. When the user has
+already approved the run ("fix, check, then run"), create the launch card after the check
+returns go. Chain it with `--parent <last fix card>`, so your approval of that fix starts
+the launch with no extra round trip. Give the launch card its own pre-push re-checks and a
+one-push cap. If you already bundled
+them, say so plainly and give the user the stop path (e.g. Cancel in the platform web UI,
+since the CLI has no cancel) together with the rule you will apply if the run starts
+before the check returns.
 
 "Stop this" (for good) is not a pause.
 - `block` with the user's decision, the list of kept artifacts, and "do not resume".
@@ -232,6 +302,25 @@ comment the correction on any child card that already started, and check that no
 pushed under the losing value. Tell the user plainly that the two reviews disagreed and
 which one you kept.
 
+Before re-running a long check yourself (an offline dry-run takes minutes), run `ps` for
+the dispatched review's process. If it is already running the same check, do not start a
+second copy. Two copies compete for the CPU, and a foreground shell call can hit its
+timeout. Wait for the dispatched verdict instead, and reproduce its claim afterwards with
+a cheap targeted probe (e.g. a tiny fixture for the one function in question).
+
+While that dispatched review run is live, `hermes kanban complete` from the chat is refused
+("a live worker is running it"). Post your verdict as a `comment` (severity-tagged, with the
+numbers you reproduced) and let the dispatched run close the card. Do not `--force` or
+`reclaim` to get your own approval in: that kills the run mid-review and leaves the card
+with a crashed run and two half-verdicts.
+`request-changes` from the chat is refused the other way round: it works only inside an
+active review run ("task is not in an active review run"), so a card sitting in `review`
+before the reviewer run starts cannot be bounced from the chat. Post the 🔴 as a comment
+that says "bounce this in the review run", with the exact fix and any "do not re-run the
+side effect (no second push)" line. If the missing item is separable from an
+irreversible step the card already did, have it moved to its own small card rather than
+re-running the original body.
+
 State residual weakness even when every gate passes — a criterion cleared by a hair, or a
 confidence interval still spanning zero, belongs in the report next to the PASS.
 
@@ -250,6 +339,24 @@ is routinely reported when the file was overwritten, moved, or left in place; on
 `diff -q` settles it, and an unverified file claim is the kind that turns into a real
 accident on the next card.
 
+**Read a report card's full result, not the truncated summary.** `hermes kanban show`
+cuts a long `kanban_complete` summary mid-sentence and drops its metadata. For a
+final-check or analysis card, read the worker's own record: open
+`~/.hermes/profiles/<worker>/state.db` read-only (`sqlite3` URI `?mode=ro`), table
+`messages`, the last assistant row of that session whose `tool_calls` holds
+`kanban_complete`. Its `metadata` carries the per-criterion verdicts, defects and scripts.
+Relay from that, and say which of your earlier claims it overturned.
+
+**Attribute every recommendation to its source.** When a second-opinion or final-check
+report comes back, keep three things apart in the reply: the checker's own one-line advice
+(quote its "advisory" field), your own recommendation, and anything you derived from the
+checker's findings but the checker did not say. This user asks "is that the checker's
+recommendation too?" when they blur. If they differ, say so and offer to put your variant
+in front of the checker on the next check. Because he weighs the checker's view, ask for it
+explicitly in the check card: "for each question give your own judgment and
+recommendation (advisory), say where you disagree with the reviewer and why with numbers,
+and end with one line `checker advisory: <choice>, reason = <one line>`".
+
 ### 7. Let the human approve side effects
 
 When a card blocks for approval on a change with real consequences, present the verified
@@ -266,6 +373,26 @@ that split.
 
 Slots, quotas, and publish targets are limited resources: recommend, quantify the expected
 gain on the current regime, and let the user spend them.
+
+**Write a user decision into the project work log in the turn it is made.** When he relaxes
+a criterion or a standing rule (accepting a missed floor, dropping a one-shot held-out),
+open a small helper card that appends a `user decision (override): <what>, basis: <numbers,
+card>` section verbatim and commits it. A decision recorded only in a card comment is
+invisible to the next audit and gets flagged as a rule violation.
+
+**Re-read the gate you just approved before declaring the work done.** A contamination or
+safety guard can pass its own tests and still fail open on a missing input (e.g. a
+reference file absent → a check silently degrades to a weaker mode and exits 0). After
+approving, run the guard once with each of its inputs removed or truncated; a fail-open
+path is a 🔴 and goes to a follow-up card at once. When writing the bounce reason, make the
+required behaviours consistent with each other ("union, never replace" and "must exit 1"
+cannot both apply to the same input).
+
+**Announce every card you create in the same chat reply that reports the review.** A
+follow-up fix card opened while reviewing (e.g. a defect found in the worker's tooling)
+is a decision the user did not see. Its later "handed off for review" notification then
+arrives as a surprise and needs an apology. State its id, why it exists, and whether it
+changes any already-reported result.
 
 ### Hold licence and attribution requirements even when told to drop them
 
@@ -302,6 +429,54 @@ chat. Structure that survives the context gap:
 Attach the file to the chat as well as writing it — on platforms that render attachments the
 user wants the downloadable artifact, not only the prose.
 
+When the user asks for "everything so far as an md file" mid-project, build it from fresh
+primary sources in the same turn (submission CSV, LB CSV, `git log`, zip sha256/size,
+CHANGES files, result summaries, cron list, board `ls`), not from memory or the compacted
+summary. Put the timestamp of the snapshot in the header, mark estimates as such, and
+include a table of your own corrected claims and one of the final checks run. Write it
+under the profile's cache (not the repo) and attach it with `MEDIA:`; committing it into
+the project is a separate decision for after the fact-check. For a competition, use these
+sections:
+- submission table: ref, UTC date, config, LB, pre-registered verdict
+- completed phases, with measured numbers only
+- in progress, with live counts
+- decisions pending, each with your recommendation
+- ops state: quota, slots left today, active crons, live cards
+- risks and unverified items
+- file locations
+
+Re-poll the scored list right before writing: a score that lands while you write changes
+the pending decisions. Lead the reply with it, and say which recommendation it weakens.
+If he asks for it to be
+checked, the check card is a pure fact-audit: every number traced to its source file,
+mismatches returned as line number + doc value + source value + replacement text, and the
+checker edits nothing.
+
+Writing and revising that summary doc:
+- **State each threshold once and derive every restatement from it.** A summary that says
+  "±3 tasks are distinguishable" in one section and computes power 0.55 for +3 in another
+  contradicts itself; write the computed section first and copy its conclusion verbatim.
+  Give every quoted outside number its source (notebook slug, thread id, "participant
+  claim" vs staff reply) and give every comparison its baseline ("−3 vs v6", not a bare "−8").
+- **When state changes after the snapshot time** (a cron registered, a card approved),
+  comment on the running check card that it happened after the snapshot, so the checker
+  reports it as "changed since" instead of as an error.
+- **Treat a checker's "unsupported" as a prompt to re-check, not to delete.** Open the
+  primary source yourself; if it confirms the claim, keep it with the citation (a staff
+  reply quoted verbatim), and delete only what nothing supports.
+- **Revise as a versioned file**: copy the checked version to `<name>_v1.md`, mark the
+  header "corrected v2 (check <card id>, N items)", add the doc itself to the corrections
+  table, re-attach with `MEDIA:`, and list the fixes item by item in the reply, plus what
+  the checker could not verify. A fix that belongs in the repo (a missing record) goes to
+  a worker card in the same turn.
+
+**"Didn't we decide X earlier?" — check the record before you answer.** Search the session
+history: the profile's `state.db`, table `messages`, filtered by session_id and a keyword,
+opened read-only. Also grep the user's shared documents and the project docs. Then quote
+what was actually said. If nothing was decided, say so plainly. Give the reason the
+premise doesn't hold (e.g. the data step uses no GPU at all), and ask whether the decision
+was made in another chat. Agreeing from a vague memory plants a false decision in the plan.
+
 If a conclusion recorded earlier in the same session was later refuted by your own analysis,
 correct it in the handoff and say it was corrected. Carrying a superseded framing into the
 handoff is how a wrong cause outlives the session that disproved it.
@@ -319,6 +494,13 @@ Rules that apply every time a card misbehaves. Recipes and state-machine details
   `AGENTS.md`, and `pip install` all block. Design the card around that (draft + user `cp`,
   local result + interactive push, numpy reimplementation). Never route around the security
   scan.
+  - Ask for the `cp` only after the last card that edits the draft is approved; otherwise the
+    user installs a stale file. Leave the parent blocked meanwhile, and `unlink` it from the
+    editing child so the child is not stuck waiting on it.
+  - If the user tells you to do the copy yourself, first check `diff` shows only the
+    intended lines, back up the current file (`AGENTS.md.bak_<date>_<reason>`), then copy,
+    verify with `cmp` and the ignore check, comment it on the card, and complete the blocked
+    parent.
 - **Scarce remote quota (GPU hours): guard on two layers.** Put a pre-push checklist comment
   on every card and run a `no_agent` push watchdog cron. Cards that wait on a remote job use
   short status calls, never long foreground wait loops.
@@ -331,6 +513,24 @@ Rules that apply every time a card misbehaves. Recipes and state-machine details
   same missing decision, and you get a second triage notification. Once a card lands in
   `triage`, archive it with a comment that records its results and why it stopped. Carry
   the work on in a new card that is created only after the user decides.
+  The decomposer can also split a blocked card into several new child cards, and one of
+  them starts running at once. That repeats side effects the parent was capped at, such as
+  a second push. Right after any block or triage event, run `ls`. Archive every
+  `auto-decomposer` card, using `show` → `created ... by auto-decomposer` to identify
+  them. Kill the live worker pid of each, then confirm with `ps` and the remote status that
+  nothing ran. To prevent it, write "do not decompose this card into sub-cards" in the
+  body of every card that has an irreversible step.
+- **Run `ls` right before `create`.** A parallel session of your own profile can create a
+  card for the same purpose at the same moment. Two workers then edit the same files and
+  overwrite each other's work. Keep the card that started first, archive the other with a
+  comment pointing to the survivor, and kill its worker.
+- **Check the side effect before killing a run you think is in the wrong mode.** Unblocking a
+  card that was blocked from `review` returns it to `review`; after reassigning it to the
+  worker, the dispatcher starts the worker with the review skill, and that run can still
+  execute the PUSH_OK step. Before `kill`, read the remote state (`<platform-cli> jobs list
+  --mine`, `kernels status`, submissions list). If the side effect already happened, do not
+  kill. If you already did, comment "already pushed at <time>, do NOT push again; only wait,
+  collect and verify" before the next run claims it.
 - Close a card that met its stated goal even if the result disappointed; put the performance
   question on a new card.
 

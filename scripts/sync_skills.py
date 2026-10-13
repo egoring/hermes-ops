@@ -103,9 +103,13 @@ _SKIP = {Path(__file__).resolve(), _LOCAL.resolve(), _REDACT_LOCAL.resolve(), _S
 
 
 def _files():
-    for f in sorted(REPO.rglob("*")):
-        if f.is_file() and ".git" not in f.relative_to(REPO).parts and f.resolve() not in _SKIP \
-                and f.name != "변경이력.md":  # 로컬 전용(.gitignore)
+    # 공개될 파일만 검사한다: git이 추적하거나 추적할 파일(.gitignore 제외분은 로컬 전용이라 건너뜀)
+    import subprocess
+    out = subprocess.run(["git", "-C", str(REPO), "ls-files", "-co", "--exclude-standard", "-z"],
+                         capture_output=True, text=True, check=True).stdout
+    for rel in sorted(p for p in out.split("\0") if p):
+        f = REPO / rel
+        if f.is_file() and f.resolve() not in _SKIP:
             yield f
 
 

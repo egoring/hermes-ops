@@ -66,6 +66,49 @@ if per-seed sd is ~15% of the mean and the effect is ~1%, small samples are pure
   improve" fails genuinely good changes when effect < noise.
 - A hard gate is empirical and **dataset-dependent**: re-measure it on every new dataset.
   "Same logic, so the earlier result carries over" is invalid.
+- **Measure a new judge metric's same-config seed spread before comparing candidates on
+  it.** An external judge can be far more seed-sensitive than the in-domain metric (seed sd
+  0.009 vs ≤ 0.002 for the same models), so single-seed candidate comparisons on it measure
+  seed noise. Check the spread on runs you already have (re-trains of one config), then
+  compare k-seed means with SE = √(sd_a²/k + sd_b²/k).
+- **Price an ensemble gain against the deployed configuration, not against one model.** A
+  gain measured as "single model → k-seed average" is mostly the generic averaging effect,
+  which a deployed k-fold average already holds (single fold → 5-fold +0.026; adding seeds
+  on top +0.000). Before training extra members, run the cheap inference-only gate: Δ of
+  (deployed set + the members you already have) vs the deployed set, with a paired CI. It
+  costs minutes and can save a whole training queue.
+
+## A missed criterion caused by your own spec is not a rejection
+
+When an implementation misses a completion criterion only because two criteria in YOUR
+spec cannot both hold (e.g. a minimum success count and a per-item cap that excludes the
+items needed to reach it), do not `request-changes`: the worker cannot fix a contradiction.
+Verify the failures are all of the conflicting kind, approve, say in the review that the
+spec was wrong, and hand the user the choice (accept the miss / relax one criterion) with
+the cost of each. Record the user's choice as `사용자 결정(override)` on the card and in the
+work log.
+
+## Before a gated card starts, fold the final-check findings into the spec
+
+When the user says "start after the final check", read the check's 🟡 items for ones that
+would make the first run fail outright (missing env var, wrong input format) or make a
+completion number meaningless (a guard that cannot see the data's id format). Reproduce
+each in a minute yourself, post them as one superseding spec comment, then unblock. Starting
+unchanged on "no 🔴" just spends a worker round discovering the same defects.
+
+When the user overrides and wants the run to start before the check returns, do not hold
+the whole card: verify the leak/validity risk of the FIRST stage yourself, record
+`사용자 결정(override)` on both cards, unblock, and tell the checker its 🔴 will be folded in
+before the next expensive stage. Then post the 🔴 as added pre-registered gates (existing
+constants unchanged) on the card before that stage starts, and put the earliest one at the
+first cheap checkpoint (e.g. fold 0) so a failing design stops before the long run.
+
+## Answering "didn't we decide X earlier?"
+
+Look it up before agreeing or denying: query the profile's `state.db` messages table for the
+keyword in this session (`sqlite3 state.db "select id, substr(content,1,500) from messages
+where session_id='<id>' and content like '%<kw>%'"`). Quote what was actually said, say
+plainly if no such decision exists, and ask whether it was made elsewhere.
 
 ## Stop the review loop once the numeric core is reproduced and the conclusion is stable
 
@@ -179,6 +222,14 @@ A verification log that only ever catches the worker is not measuring itself.
   comment the decision first and then `unblock`. Unblocking first lets the dispatcher spawn
   a worker that reads the old comments and blocks again.
 - `--board` is not a global flag; switch with `hermes kanban boards switch <slug>`.
+- **Wake crons for long queues must key on a sentinel line, not on process absence.** A
+  `pgrep -f` pattern also matches the next job's process (a shared script name), so the
+  waker never sees "finished" and the card sits unreviewed. Make the queue script log
+  `ALL_DONE` / `QUEUE_STOPPED <reason>` and have the waker tail that log, write a done flag
+  before acting (one-shot), then comment → assign → unblock. Delete the cron once it fires.
+  For remote jobs (remote jobs) key on each job's terminal status instead
+  (`kernels status` → not RUNNING/QUEUED for every kernel), with the same flag-then-act
+  order; a worker that blocked "waiting on the remote platform only" otherwise sits until someone looks.
 - Subscribe notifications with `notify-subscribe --delivery-mode wake` so the orchestrator is
   woken to verify and summarize, instead of worker text being pushed to the user raw.
 - A completed card's notification summary is **truncated** — always open the card and the

@@ -111,3 +111,15 @@ EOF
 테스트: `kanban_watch.py --dry-run --since-id <과거 id>` / `weekly_metrics.py --dry-run` / `effort_watch.py --dry-run --since <epoch>`.
 
 참고: `hermes config set agent.reasoning_effort <v>`는 "not a recognized config key" 경고를 내지만 게이트웨이가 실제로 읽는 키다(`hermes_constants.resolve_reasoning_config`). 경고를 없애려면 `--force`.
+
+## R9. 봇 장애 1차 진단 (응답 없음 / 오프라인)
+
+| 증상 | 먼저 볼 것 | 판단 |
+|---|---|---|
+| 봇이 답 대신 짧은 안내 문구만 보냄, 또는 전부 응답 없음 | `hermes -p <bot> auth list` + 한 줄 테스트 `hermes -p <bot> chat -Q --max-turns 1 -q "1만 답해"` | `No Anthropic credentials found` / 로그 `terminally invalid (invalid_grant)` → **인증 만료**. 사용자가 Claude Code 재로그인(`claude /login`), 안 되면 `hermes -p <bot> auth add anthropic`. 게이트웨이 재시작 불필요 (#16) |
+| Discord에서 봇이 오프라인 | `~/.hermes/gateway_state.json`의 `platforms.<bot>:discord.error_code` | `discord_connect_error` + `No route to host` → **맥 네트워크** (#18). 회복되면 최대 5분 안에 자동 재연결 |
+| | | `discord_websocket_health_stale` (`socket_closed`, `latency_exceeded`) → **게이트웨이 지연** (#17). 직전 `Can't keep up` 경고와 그 시각의 cron·도구 실행을 확인 |
+| 한 봇만 계속 재연결 실패 | 토큰 유효성: Discord `GET /users/@me` (값은 출력하지 말 것), `session_start_limit.remaining` | 토큰·한도 정상이면 다음 재시도(5분)를 기다린다. `hermes -p <bot> gateway restart`는 multiplex 구조에서 재연결을 하지 않고 standalone 안내만 출력한다 (10-10 확인) |
+| 계속 실패 | — | `hermes gateway restart` (봇 4개 동시 재연결, 사용자 승인 필요) |
+
+봇 `.env`의 `DISCORD_BOT_TOKEN`은 **한 줄만** 둔다. 여러 줄이면 마지막 줄이 쓰이고, 앞줄에 다른 봇 토큰이 섞여 있으면 스크립트가 엉뚱한 봇으로 보낼 수 있다(10-01 정리).

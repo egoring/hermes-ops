@@ -83,6 +83,33 @@ gates in the adapter defaults before saying it just works:
 Both are adapter settings: apply with `hermes -p <bot> gateway restart` (a config re-scan does not
 rebuild a connected adapter); they then hold in existing threads as well.
 
+## "The bot isn't answering" — triage order
+
+Work from the gateway outward. Each step rules a layer in or out:
+1. `gateway_state.json` → each `<profile>:discord` `state`/`error_code`. A `fatal`
+   `discord_websocket_health_stale` adapter retries on its own about every 5 min. The log shows
+   `Secondary discord reconnect retry in 300s (profile: <bot>)`, and success is
+   `✓ discord reconnected (profile: <bot>)`. Check the token with `GET /users/@me` and the
+   `session_start_limit.remaining` from `GET /gateway/bot` before blaming it.
+2. `grep "inbound message: platform=discord user=<name>"` in `gateway.log`. No line after the
+   user's last answered message means it never reached Hermes. The usual causes are another
+   thread, a channel post without a mention, or a send during a disconnect window. Ask them to
+   resend in the same thread and watch for the line.
+3. Inbound present but the reply is ~200 chars with `api_calls=0`: look for `No Anthropic
+   credentials found` / `refresh token ... terminally invalid` in the bot's `agent.log`. The
+   shared OAuth login died, usually for every profile at once, so probe each bot with a one-shot
+   `chat -Q`. The user must re-login (`hermes -p <bot> auth add anthropic` per profile, or
+   re-login the runtime the profiles borrow). The fix takes effect on the next message with no
+   gateway restart. Kanban tasks that crashed during the outage need re-running.
+4. Replies are posted but the user saw nothing: quiet hours suppress @mentions, so there is no
+   phone notification. Tell them to open the thread.
+
+Recurring disconnects: count `Can't keep up … behind` and `[Discord] Disconnected` per day and per
+profile before proposing a cause. Then put the warning timestamps next to the cron runs and kanban
+events in the preceding minute. Report the correlation as a correlation. Prefer trimming
+finished-target cron jobs over a full gateway restart, which reconnects every bot and needs
+approval.
+
 ## "Bot is typing" is not proof of token spend
 
 The typing indicator can linger as a client-side artifact after a turn ends. Decide from the
