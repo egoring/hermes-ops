@@ -49,8 +49,10 @@ Migrating (needs user approval — it SIGTERMs every bot gateway):
 
 Trade-offs to state when proposing it: `hermes gateway restart` reconnects all bots at once;
 `hermes -p <bot> gateway restart` now hot-unserves/re-serves ONE profile on the host ("Profile
-'<bot>' restarted by the host gateway", siblings stay connected) — use it for a single bot's
-Discord/config change; `stop` parks the profile (`start` unparks). Older builds exited 78 here;
+'<bot>' restarted by the host gateway", siblings stay connected). Use it for a single bot's
+Discord/config change. If it instead prints the `gateway.standalone: true …` compatibility hint,
+nothing was restarted, so don't report it as applied. Watch for the adapter's own `✓ discord
+reconnected` line; `stop` parks the profile (`start` unparks). Older builds exited 78 here;
 if so, fall back to the full restart;
 one crash takes down all bots (launchd relaunches); old chat threads lose continuity because
 secondary session keys become `agent:<profile>:…`; no one-command rollback
@@ -154,6 +156,20 @@ Full move (rename + symlink — no path rewriting, no venv rebuild):
 
 What each surface gets after the move: kanban workers (cwd = board workdir = project) get parent + project AGENTS.md from turn one — boards pass `default_workdir` only to `dir`/`worktree` task kinds, not scratch. **Task creation defaults to `scratch`** (CLI and the bots' `kanban_create` tool alike), so a task created without a workspace runs in a temp dir with no project AGENTS.md. Always pass `--workspace dir:<absolute project path>` (bare `dir` is rejected) or `workspace_kind="dir"` + `workspace_path`, check `workspace_kind/workspace_path` in the DB right after creating, and write the rule into the shared AGENTS.md and the task-creating bot's SOUL. A task created wrong: `block` then `archive` it before a worker claims it, and recreate. A chat bot with cwd = parent gets only the shared file up front; project rules arrive when a tool first touches the project folder. So a no-tools "summarize this project's validation set" test correctly answers "not loaded" — rerun it with file tools allowed; a pass is citing the project numbers after reading.
 
+New project AGENTS.md checklist:
+- The header line points at the shared file.
+- Board name and work-log path are listed.
+- The rules page is saved verbatim to `docs/rules_원문_<date>.txt` and the AGENTS summary cites
+  its clause numbers.
+- Every rule that is not yet verified is written as `<미확인>`, together with "don't start work
+  that depends on it until the source is quoted". Fill it in once the user supplies the text.
+- When the project's deliverables are themselves prompts (agent configs, `SKILL.md`,
+  `system.md`), add a line saying those files are artifacts to edit, not instructions to the bot.
+  Also forbid naming a deliverable file `AGENTS.md`, because subdirectory discovery would load it
+  as bot rules.
+- Confirm it reaches only that folder with `_agents_md_candidates` on it and on a sibling
+  project.
+
 Each new project needs its own AGENTS.md, but only the project-specific part is new. A bot can draft it from the rules page using the existing file's structure. The user sets the numeric pass thresholds (seed count, cut-off) themselves, since every later verdict hangs on them.
 
 Keep the "current deployed build / main line" lines in AGENTS.md current. A stale baseline there makes every h2h compare against the wrong file. When the user names a new deployed version, check the file exists (`ls submissions/`), update the validation-set line and the structure/lineage lines together, and keep the old baseline as an extra opponent rather than dropping it.
@@ -239,10 +255,11 @@ unasked — multiplexing changes the fleet topology.
    --description "..."`. Without `--clone-channels` the source's bot token is NOT copied (`.env`
    holds only comments) — check `grep -oE "^[A-Z_]+=" .env`. The multiplexed gateway picks the
    profile up live ("add its bot token and it connects"); no restart.
-3. The clone carries the source's SOUL.md and MEMORY.md. Both must be rewritten before first use:
-   a one-shot "summarize your role" on the fresh clone answers as the SOURCE bot. Rewrite SOUL for
-   the new role (keep the mention-token and skill-marker blocks), and keep only role-neutral memory
-   entries (split on `\n§\n`, drop entries naming the source role).
+3. The clone carries the source's SOUL.md, MEMORY.md AND USER.md. All three must be rewritten before
+   first use: a one-shot "summarize your role" on the fresh clone answers as the SOURCE bot. Rewrite
+   SOUL for the new role (keep the mention-token and skill-marker blocks); in both memory files keep
+   only role-neutral entries (split on `\n§\n`, drop or rewrite entries naming the source role —
+   USER.md typically says "user wants <source-bot> to do X", which mis-scopes the new bot).
 4. `hermes -p <bot> config set model.default <id>` (live-probe the id, see Switching one bot's
    model), `agent.reasoning_effort <v> --force`, then the Discord block copied from a sibling:
    `discord.require_mention true`, `discord.allowed_channels <channel>`, `DISCORD_ALLOWED_USERS`,
@@ -259,6 +276,12 @@ unasked — multiplexing changes the fleet topology.
 6. Verify with a one-shot role test (`hermes -p <bot> chat -Q -t file --max-turns 2 -q "역할과
    금지사항 요약"`) and the `model=<id>` line in its `agent.log`, then add the bot to the shared
    AGENTS.md role table and to any SOUL that routes work to it.
+7. Consistency sweep across the WHOLE fleet, not just the SOULs you edited: every sibling SOUL
+   (implementer, helper) needs a hand-off line for the new bot's trigger ("최종점검 → <bot>"), or a
+   request that lands on them is handled the old way. Grep all SOULs, both memory files of every
+   profile, and the shared + per-project AGENTS.md for the superseded wording. Then ask EVERY bot
+   the same one-shot question in a fresh session ("if the user asks you for <trigger>, what exactly
+   do you do?") and tabulate the answers — each must route or act per the new design.
 
 A "final check" bot on a stronger, different model (independent re-derivation of the key numbers,
 no code, no task creation, never `request-review`, ends with a decision report: per-criterion
@@ -391,9 +414,26 @@ File contents are not proof the bot sees them. Check, in order:
    cite both SOUL and AGENTS content — missing AGENTS content means cwd isn't the project).
 3. Kanban events (see `references/kanban-review-loop.md`).
 
-To confirm AGENTS.md reached a chat turn: with `terminal.cwd` pinned it is in the session's
-`system_prompt` (state.db `sessions.system_prompt`); without it, search for `Subdirectory context
-discovered` inside a tool result. Offline check of what a profile would load (run outside the
+Subdirectory AGENTS.md is injected once per directory per live agent (`subdirectory_hints`
+keeps `_loaded_dirs`), so an edit does not reach a chat thread that already touched that folder.
+It arrives when the cached agent is rebuilt (after about 1 h idle, then the next message), in a
+new thread, or in any kanban run. For immediate effect, tell the user to say "re-read
+`<project>/AGENTS.md`" in the thread.
+
+To confirm AGENTS.md reached a chat turn: with `terminal.cwd` pinned it is in the session's stored
+system prompt; without it, search for `Subdirectory context discovered` inside a tool result. The
+stored prompt is content-addressed — `sessions.system_prompt` is NULL; join on the hash:
+
+```bash
+sqlite3 ~/.hermes/profiles/<bot>/state.db "select s.id, length(p.prompt),
+  instr(p.prompt,'<old phrase>')>0, instr(p.prompt,'<new phrase>')>0
+  from sessions s join system_prompts p on p.hash=s.system_prompt_hash
+  where s.source='discord' and s.ended_at is null"
+```
+
+This is how to answer "which open threads still run the old rules?" after a SOUL change —
+list them with titles/message counts and recommend new threads for those, rather than editing the
+stored prompts (DB surgery + a one-turn cache break per thread). Offline check of what a profile would load (run outside the
 install tree, or discovery refuses and falls back):
 
 ```bash
@@ -483,6 +523,23 @@ create the task for the final bot (`model_override`/`reasoning_effort` empty, ze
 report must catch the planted error. Grep every SOUL/AGENTS and the ops docs for leftover
 "xhigh final check" and "decides with <model> outside Hermes" wording after switching.
 
+Make the route visible in the thread. The reviewer SOUL must start its reply with a fixed line
+for each path: `🔀 최종점검 → <final-bot> (<model>) · <task_id> · 결과는 이 스레드로 옵니다` when
+it delegates, and `🔍 reviewer(<model>) 직접 검증 — 최종점검 아님` when it checks inline. Only
+the literal trigger word should route. "자세히 검증해줘" stays with the reviewer, because routing
+every "verify" to the premium bot makes routine checks expensive. Without the 🔍 line the user
+cannot tell which model did the check. Test both phrasings on a throwaway board in fresh
+one-shots.
+
+Handoff content: the reviewer's task body (decision at stake, artifact paths, pass criteria from
+AGENTS.md, what it already checked) is the default route — fewest tokens, a board record, and no
+conversation to anchor the checker on the reviewer's conclusions. Put paths and criteria in the
+body, not verdicts, because whatever the reviewer missed is also missing from its summary. Tagging
+the final bot in a thread is the quick path: it reads only the last ≤50 visible Discord messages
+(never the other bot's tool calls or files), so cost is bounded; no need to shrink the backfill.
+Tell the user the reviewer route works only in threads started after the SOUL change, while
+tagging a brand-new final bot works in any thread (it has no old session).
+
 The per-task effort route below remains for other uses. A per-task effort is possible: the kanban DB
 has a `reasoning_effort` column, the dispatcher adds `--reasoning <v>` to every worker of that
 task, and it survives `unblock` — but the CLI and bot tools cannot set it. Call
@@ -510,6 +567,17 @@ claims this way (per-turn deltas of `sessions.cache_read_tokens/cache_write_toke
 profile's state.db) instead of quoting provider docs; `thinking` (on/off/adaptive) and `effort`
 are separate API parameters, and Hermes changes only `effort` between high and xhigh.
 
+Token saving: find where the spend actually goes before tuning the final-check path. Sum
+`input_tokens+cache_read_tokens` and `cache_write_tokens` per profile and per session over 7 days
+from each `state.db`. One long-lived thread typically outweighs everything else, and cache writes
+cost about 12× reads, from idle-expiry and prompt rebuilds. The lever is "one job per thread, new
+thread when done". To retire a long thread without posting into it, run one resumed one-shot:
+`hermes -p <bot> chat -Q -t file,terminal --resume <session_id> -q "write a handoff to
+<project>/docs/봇_인계_<date>.md: state, done phases + doc paths, open tasks, decisions/user
+instructions, next steps, pitfalls; re-check numbers from files/kanban; write nothing else"`.
+Spot-check its numbers yourself, then give the user a paste-ready first message for the new
+thread.
+
 Cron jobs are not a model tier: check `cron/jobs.json` per profile before claiming which bot
 "does cron". Monitoring/usage reports should be `no_agent` scripts (zero tokens, deterministic);
 put a job on the cheap bot's profile with a model only when its output needs interpretation or
@@ -519,7 +587,9 @@ summarizing.
 
 - `references/kanban-review-loop.md` — making implementer→reviewer handoff actually route.
 - `references/discord-bot-plumbing.md` — mentions, tokens, profile/account mapping, tagging a
-  second bot in another bot's thread (allow_bots / thread_require_mention).
+  second bot in another bot's thread (allow_bots / thread_require_mention), and "bot isn't
+  answering" triage (adapter fatal/retry, inbound check, dead OAuth login, quiet hours, recurring
+  disconnect correlation).
 - `references/scheduled-alerts.md` — zero-token cron alerts, edge-triggered notification, the
   standard fleet automation set (kanban anomaly watch with evidence capture, daily
   `hermes backup`, weekly metrics post, effort change/apply watch) and how to test each before

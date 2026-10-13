@@ -12,7 +12,10 @@ plausible the write-up reads.
 
 1. **Scope** — did the change stay inside what was asked? Diff the workspace against the
    known-good baseline copy and read the diff yourself. "Only file X was modified" is the
-   single most common inaccurate claim, and the cheapest to check.
+   single most common inaccurate claim, and the cheapest to check. When the change is
+   embedded (a script inlined as a string literal inside a notebook cell), extract it with
+   `ast.literal_eval` and diff that against the original — a diff of the notebook JSON
+   cannot show a one-line patch inside an escaped blob.
 2. **Recomputation** — load the raw result artifact (JSON/pickle/CSV the worker produced)
    and recompute the headline statistics independently. Do not re-read the worker's summary
    table; compute from the values.
@@ -38,6 +41,57 @@ plausible the write-up reads.
 8. **Measured vs derived** — for every load-bearing quantity, ask whether the script
    *observed* it or *computed* it from a formula. Only observed values are evidence; see
    below.
+9. **Did the change change the output at all?** — compare the new output against the
+   baseline output, not only against a recomputation of itself. See "Plumbing gates on a
+   tiny smoke input" below.
+
+## A baseline that returns nothing is not a comparison
+
+Before relaying "ours beats the baseline by X", count how often the baseline produced
+any output at all. A baseline empty on most units turns the margin into a measure of its
+emptiness. Recompute the comparison on the units where the baseline is non-empty and
+report both. When you wrote the spec, own the weak baseline as a design error. Also
+check any absolute floor you set against n: if the observed value sits inside the
+binomial CI of the floor, a "miss" is undecidable. Say so, and route it to the user as an
+override decision rather than a redesign.
+
+## Plumbing gates on a tiny smoke input
+
+When the only runnable input is a handful of rows (a competition's visible test, a smoke
+fixture), a gate like "recompute == kernel output, max|d| 0.0" proves the wiring and
+nothing about the effect. Check whether the new output is identical to the baseline output:
+a small-weight rank blend over 3 rows cannot reorder anything, so a blend at any W ≤ ~0.3
+returns the baseline exactly. Report that explicitly as "plumbing verified, effect
+unobservable here", so a perfect gate sheet is not read as evidence the change does
+something.
+
+The same applies to **fail-safe fallbacks**. A design that silently restores the baseline
+when the new branch fails (skip on timeout, error, format mismatch) makes an unchanged
+downstream score ambiguous: "no effect" and "branch skipped" look the same, and in a
+scoring environment whose logs you cannot see, the ambiguity is permanent. Name it before
+the user spends a scarce slot on it. When designing such a card, prefer a path whose
+success is observable (a variant that cannot be byte-equal to the baseline when it ran,
+or a second arm whose expected direction differs), and state the residual ambiguity in the
+decision packet when that is not possible.
+
+## Fail-closed guards: attack every way they can quietly weaken
+
+For a guard the spec says "cannot be turned off" (contamination filter, sha gate, quota
+guard), passing its own tests proves little. Before approving, run the bypasses yourself:
+
+- **Override arguments that replace instead of add.** Feed a partial list (e.g. the first 3
+  lines of the held-out list) through the override flag; if a held-out item reaches the
+  output, the flag replaces the default. Required fix: the default is always loaded, the
+  flag only unions, and the default's size and sha are asserted and recorded.
+- **Missing or unreadable auxiliary inputs.** Point every secondary input (a file the guard
+  uses to derive extra keys) at a nonexistent path and at a copy missing one required row.
+  A silent fallback ("id only") that shrinks the key count is the same bug as an off switch;
+  require exit 1 with no output written.
+- Compare the guard's key count against the full run (e.g. 81 vs 47) — a drop is the tell.
+
+When writing the request-changes text, check the required outcomes are consistent with each
+other ("flag only unions" and "partial list must exit 1" cannot both hold); state the
+observable result of the intended behaviour instead of two incompatible ones.
 
 ## Derived quantities are not measurements
 
@@ -121,5 +175,9 @@ cannot argue with, and catches an incorrect implementation that happens to score
 
 Lead with whether the claims verified and how you checked. Give the reproduced numbers, not
 the worker's. Name the residual weaknesses — narrow margins, intervals containing zero,
-small numbers of affected units — next to the pass, because the worker's own summary will
-not.
+small numbers of affected units, outputs identical to baseline — next to the pass, because
+the worker's own summary will not.
+
+When the next step spends a slot whose score is max-of-selected (leaderboard submissions),
+say so in the recommendation: a worse arm cannot lower the kept score, so submitting both
+arms of a fixed pair costs only the slots and buys the direction of the effect.
