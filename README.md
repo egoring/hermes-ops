@@ -23,6 +23,7 @@
 | `docs/05_결정기록.md` | 왜 이 구조인가 (D1~) | 구조를 바꾸고 싶을 때 |
 | `docs/06_이슈.md` | 미해결 이슈 (인증 만료·Discord 끊김·네트워크 포함) | 점검·장애 |
 | `docs/07_최종점검.md` | 최종점검을 fable-bot(Fable 5.1)이 맡는 구조, 흐름, 보고서 형식, 검증 | 제출·배포 전 |
+| `docs/08_통합대시보드_설계.md` | 프로젝트 중심 통합 대시보드(Next.js + FastAPI, Docker + Kubernetes) 설계서 | 대시보드 구축·변경 |
 | `projects/example.md` | 프로젝트 연결 정보 양식. 실제 `projects/<이름>.md`는 **로컬 전용** (`.gitignore`) | 프로젝트 추가 |
 | `issue_drafts/` | Hermes upstream 제보 원문 (#127651, #127652 제출됨) | 제보할 때 |
 | `scripts/kanban_set_effort.py` | 태스크 하나의 추론 강도 지정/해제 (CLI에 없는 기능) | 특정 태스크 추론 강도 조정 (최종점검은 fable-bot으로 이전) |
