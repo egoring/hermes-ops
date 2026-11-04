@@ -63,3 +63,49 @@ pmset -g assertions | grep -E 'PreventUserIdle|NoIdleSleep'   # who blocks sleep
 - Battery-only power settings need sudo. Hand the user the command; never type a password: `sudo pmset -b displaysleep 5 lowpowermode 1 powernap 0`.
 - Quitting the user's apps: only when explicitly asked. Order: `osascript -e 'tell application "X" to quit'` → wait ~30 s → `kill -TERM <pid>` → wait ~20 s → `kill -KILL`. Tell the user a force-killed browser shows a restore-tabs prompt.
 - Report as a before/after table of CPU-time deltas plus 1-min load average, and name what still dominates.
+
+## "Can this Mac run the fleet 24/7?" — host capacity check
+
+Answer with a status table, not a yes/no. One batch:
+
+```bash
+sysctl -n hw.memsize machdep.cpu.brand_string; uptime; sysctl vm.swapusage
+memory_pressure -Q | tail -1; pmset -g batt | head -2; pmset -g | grep -E ' sleep|powernap|womp'
+df -h / | tail -1; docker info --format 'cpus={{.NCPU}} mem={{.MemTotal}}'; docker system df
+```
+
+- **Swap used near its total is the real memory signal**, even when free memory looks high right
+  now — it records the last time heavy jobs overlapped.
+- **Docker Desktop's VM memory is reserved from the host.** A VM sized near total RAM starves
+  the bots, training jobs and the browser into swap; recommend sizing it to the largest real
+  container workload (Settings → Resources, a user GUI step) and list Kubernetes' control plane
+  (~1–2 GB standing) as extra if a cluster is planned.
+- **Disk free under ~80 GB is a risk** for image builds and dataset downloads; offer the Docker
+  cleanup below.
+- `sleep 0 (prevented by …)` keeps the system awake only with the lid open or with external
+  display + power; say so.
+
+## Docker disk cleanup
+
+1. Inventory, read-only: `docker system df` (images / containers / volumes / build cache),
+   `docker ps -a`, `docker images`, volume sizes from `docker system df -v`, which images running
+   containers use, and the host size of `~/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw`.
+2. Propose three groups and delete nothing yet: **A** zero-risk (build cache, exited or
+   long-idle sandbox containers — keep any image an active project still spawns from), **B**
+   old projects (image + volume + what is lost, which data is re-downloadable), **C** keep. Let
+   the user pick.
+3. **Never probe a volume by name with `docker run -v <name>:…`** — a missing named volume is
+   silently created. Use `docker volume inspect` / `docker system df -v` instead; if you did
+   create one, say so and remove it in group A.
+4. Before deleting a database volume, dump it: start a throwaway container of the same image on
+   the volume, find the superuser when `postgres` does not exist
+   (`strings <PGDATA>/global/1260 | head` lists role names), `pg_dumpall -U <role>` to
+   `~/.hermes/backups/<ts>/` with chmod 600, check the dump is non-empty and error-free, then
+   remove the throwaway container.
+5. Right before deleting, re-check nothing active uses the kept images (`docker ps`, and
+   `pgrep -fl "work kanban task"` for a project job that spawns sandbox containers). Delete in
+   order: containers → images → volumes → `docker builder prune -a -f`. Confirm with
+   `docker system df`, `df -h /`, and the `Docker.raw` size. If host free space does not grow,
+   restarting Docker Desktop releases it.
+6. Report a before/after table (host free GB, Docker.raw size), what was kept and why, the dump
+   path, and what must be rebuilt or re-downloaded if needed later.

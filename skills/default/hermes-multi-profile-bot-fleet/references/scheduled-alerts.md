@@ -57,6 +57,30 @@ reasoning effort — **effort watch**, every 5 min, three signals:
   `json_extract(model_config,'$.reasoning_config.effort')` differs from the profile default
   (watermark on `started_at`). This is the proof; 🎚 without ✅ means set but not yet run.
 
+A fifth job when workers wait on long external runs (remote jobs, GPU training) — **kanban
+auto-wake**, every 15 min. `kanban_schedule` only parks a card in `scheduled`; it creates no timer
+and nothing in Hermes parses its reason, so a parked card stays parked until someone runs
+`unblock` (cards sat hours past their own `SCHEDULED_UNTIL=`). Telling workers "schedule instead
+of sleep" without a waker just turns crashes into silent stalls. The waker:
+- reads `status='scheduled'` cards (DB `mode=ro`), takes the latest `scheduled` event's `reason`,
+  matches `SCHEDULED_UNTIL=(\S+)`, parses with `datetime.fromisoformat` after stripping trailing
+  punctuation (naive → KST);
+- leaves cards WITHOUT the marker alone (reviewer/human parks);
+- wakes due cards via `hermes kanban --board <b> unblock <id> --reason "[auto-wake] …"` (unblock
+  accepts `scheduled`); counts prior wakes from `task_comments` bodies CONTAINING the tag
+  (`like '%[auto-wake]%'`) — the CLI stores the reason as `UNBLOCK: <reason>`, so a prefix match
+  counts 0 forever and the cap never fires; stops at a cap (12) with a one-time hang alert;
+  one-time alert for an unparseable marker;
+- skips boards whose DB has no `tasks` table (empty boards exist); silent when nothing happened.
+Test: parser cases (offset, naive, `Z`, garbage) + `--dry-run` against the real boards — it must
+list only overdue marked cards and write no state file. After the first real run, prove the whole
+chain from the DB, not the script output: card `scheduled → ready` with an `unblocked` event, the
+comment counted as 1 by the script's own query, a new `task_runs` row for the assignee within one
+dispatcher tick (~1 min, `gateway.log` "spawned=1"), and a second `--dry-run` silent. Before enabling, tell the user which
+already-overdue cards the first run will wake (each re-spawns its assignee) and let them exclude
+any. Pair it with the worker rule in the shared AGENTS.md (comment status → `kanban_schedule` with
+the marker; waiting is not a block reason) and a behavior test for it.
+
 `hermes config set agent.reasoning_effort <v>` prints "not a recognized config key" but it is the
 key the gateway reads (`hermes_constants.resolve_reasoning_config`); add `--force` to silence it.
 

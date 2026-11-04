@@ -38,12 +38,28 @@ plausible the write-up reads.
    dev tree. A wrapper that imports its base by path works locally and fails wherever a
    single self-contained file is required; check packaging form, entry point, and runtime
    limits (per-call time budget, memory) against the target's constraints.
+   **Check which interpreter and library versions the worker's dry-run used.** A dry-run
+   under the dev venv can pass on an import that the target's (newer or older) library no
+   longer has. Require the run to print its key package versions, and compare them with
+   the versions the target will install before you accept "dry-run exit 0".
 8. **Measured vs derived** — for every load-bearing quantity, ask whether the script
    *observed* it or *computed* it from a formula. Only observed values are evidence; see
    below.
 9. **Did the change change the output at all?** — compare the new output against the
    baseline output, not only against a recomputation of itself. See "Plumbing gates on a
    tiny smoke input" below.
+
+## Check what a branch gate compares against
+
+A gate that chooses between variants ("adopt weight 0.6 if its CI lower bound > 0") only means
+something when the comparator is the **incumbent setting**. Read the script's paired-difference
+line and confirm which arm is being subtracted. A sweep scored against a weak reference, such as
+the component-removed baseline instead of the current weight, passes "CI > 0" at every grid
+point, so it ranks nothing. The tell is that every variant clears the gate by a wide margin.
+When you spot it, bounce with the exact pair to compute (C(w) − C(incumbent), same resample
+indices). Leave the branch rule itself unchanged and keep the wrong-reference table only as a
+record. Do not let a push the worker already made under the bad verdict count as approval: the
+rule is re-applied to the corrected numbers, and that decides whether the push is used at all.
 
 ## A baseline that returns nothing is not a comparison
 
@@ -54,6 +70,24 @@ report both. When you wrote the spec, own the weak baseline as a design error. A
 check any absolute floor you set against n: if the observed value sits inside the
 binomial CI of the floor, a "miss" is undecidable. Say so, and route it to the user as an
 override decision rather than a redesign.
+
+## A reported zero is a claim about a classifier — recount it mechanically
+
+When a worker reports "0 leaks", "0 failures" or "0 violations", recount from the raw
+answers with a dumb matcher against the source list. For leaks, strip answers to digits
+and match them against every personal number, then substring-match the addresses. Any hit
+the worker did not count rests on a judgement ("a farm address is not personal"). Report
+that judgement as a policy question for the user, not as a pass. The same matcher
+confirms a real zero in seconds, so run it even when you expect agreement.
+
+## Check the headroom of any adopted limit
+
+When a card adopts a cap (output tokens, timeout, memory, batch size), report the
+maximum observed value as a fraction of the cap, not just the failure count at the cap.
+Above ~80% the margin is thin. Re-probe with inputs heavier than the worker's set before
+approving; a cap with 0/30 failures on the worker's set failed on a reviewer-written
+question that needed slightly more. A time margin ("max 59 s vs 240 s deadline") says
+nothing about the token margin, so check each limit the run can hit.
 
 ## Plumbing gates on a tiny smoke input
 
@@ -74,6 +108,14 @@ success is observable (a variant that cannot be byte-equal to the baseline when 
 or a second arm whose expected direction differs), and state the residual ambiguity in the
 decision packet when that is not possible.
 
+## Read rewritten text artifacts as bytes, not through the read tool
+
+When a worker rewrites a small text file (counts, id lists, configs), check it with `od -c | head`
+or `cat`, not a line-numbered viewer. Workers that read a file with a `N|content` viewer and write
+it back can leave `1|`, `2|` prefixes in the file; a line-numbered display hides them because it
+adds the same prefix. Add `grep -c '^[0-9]*|' <file>` = 0 to the completion criteria of any card
+that rewrites such a file.
+
 ## Fail-closed guards: attack every way they can quietly weaken
 
 For a guard the spec says "cannot be turned off" (contamination filter, sha gate, quota
@@ -88,6 +130,10 @@ guard), passing its own tests proves little. Before approving, run the bypasses 
   A silent fallback ("id only") that shrinks the key count is the same bug as an off switch;
   require exit 1 with no output written.
 - Compare the guard's key count against the full run (e.g. 81 vs 47) — a drop is the tell.
+- **Baseline-relative exemptions.** "Skip what the baseline already contains" is fail-open when the baseline itself was never checked. A contaminated ancestor then passes every descendant. Plant the same bad value in both the baseline and the candidate. Require an explicit allowlist with a reason per entry, printed in the output.
+- **Inputs the guard cannot parse.** A decode or parse error caught by `except: continue` silently drops the whole input. Inject one invalid byte into each accepted file type. The guard must FAIL that file and print it, not shrink its scan.
+- **Spelling variants of a known-bad value.** A matcher that compares whole tokens only catches the fixture's exact spelling. Re-run it with the bad identifier behind a different prefix (`self.X`, `obj.X()`) or before a generic suffix (`X.add`).
+- **Test-mode switches.** An env flag that skips part of the checks must not end in the same PASS line or exit code as a full run.
 
 When writing the request-changes text, check the required outcomes are consistent with each
 other ("flag only unions" and "partial list must exit 1" cannot both hold); state the
@@ -167,9 +213,33 @@ by any real change, and "the mean must improve" is a coin flip. Split the criter
   bounded.
 - **Soft gates track improvement**: mean and median at least match the baseline.
 
+For latency (or any per-item cost) criteria, compare **paired per-item differences**, not
+the set-level p50 before vs after. Different items dominate each set's median, so a
+set-p50 of +1.5 s can hide a paired median of +0.2 s when the per-item sd is 2.8 s. Write
+the criterion as "paired median Δ ≤ X" from the start. When an old card used set p50,
+record the miss under its rule and add the paired numbers as decision info.
+
 Publish the expected reproduction values (mean, median, the exact list of changed units and
 their deltas) inside the criteria. That turns acceptance into an equality check a worker
 cannot argue with, and catches an incorrect implementation that happens to score well.
+
+## A combination found on the evaluation data is a hypothesis
+
+When your own post-hoc analysis of a failed card finds a variant that clears the bar on the
+same rows (two failed graders chained, a threshold picked after seeing the misses), do not
+adopt it and do not report it as the result. Open a validation card with the rule
+pre-registered, written before any data is generated, and committed. Run it on fresh rows
+with **different perturbation families** than the discovery set (e.g. swap names, shift
+dates, not only change numbers). Report recall per family. A stage that sees only one
+feature type passes the discovery set and fails every family it cannot see. A failed
+validation is a valid result: the card ships no tool, and the user decides whether to
+override.
+
+## Re-pointing your own probe at a new artifact
+
+To re-run an earlier probe (leak check, edge probe) against a fixed version, edit its input-path constant and **print that constant line before reading the output**. A `sed` pattern that does not match the exact path text leaves the old path in place. The probe then re-reads the old artifact and "finds the bug still there", or worse, passes on stale input. Also confirm that the input's sha or size equals the new artifact.
+
+Keep cleanup (`rm -rf` of probe folders) out of the probe command. Build probes under the auto-pruned scratch dir and leave them. A destructive step chained into the same shell call waits for approval, and on timeout the whole check, including the read-only probes, never runs.
 
 ## Reporting
 

@@ -5,6 +5,7 @@
 사용:
   python3 scripts/sync_skills.py          # 복사 + 검사
   python3 scripts/sync_skills.py --check  # 검사만 (복사 안 함)
+  (그 밖의 인자는 무시한다. --help 도 복사를 실행하니 주의)
 검사에 걸리면 exit 1 → 커밋/푸시하지 말고 원본을 고치거나 PII_ALLOW에 사유와 함께 추가.
 """
 import re
@@ -23,8 +24,16 @@ SKILLS = [
     ("reviewer-bot/kanban-orchestration", "profiles/reviewer-bot/skills/software-development/kanban-orchestration"),
     ("reviewer-bot/kanban-work-delegation", "profiles/reviewer-bot/skills/software-development/kanban-work-delegation"),
     ("reviewer-bot/kanban-task-orchestration", "profiles/reviewer-bot/skills/autonomous-ai-agents/kanban-task-orchestration"),
-    ("coder-bot/shared-thread-scope-discipline", "profiles/coder-bot/skills/autonomous-ai-agents/shared-thread-scope-discipline"),
+    # coder-bot/shared-thread-scope-discipline: 11-04 원본이 .archive 로 보관돼 목록에서 뺐다 (스냅샷도 제거)
 ]
+
+# 운영 스크립트 스냅샷 (저장소 안 경로, ~/.hermes 기준 원본). 복사할 때 SOUL과 같은 ID 치환을 한다.
+SCRIPTS = [
+    ("hermes/kanban_wake.py", "scripts/kanban_wake.py"),        # SCHEDULED_UNTIL 카드 깨우기 (cron, 15분)
+    ("hermes/_notify.py", "scripts/_notify.py"),                # kanban_wake 의 Discord 알림 모듈
+    ("hermes/skill_recommend.py", "hooks/skill_recommend.py"),  # 스킬 추천 pre_llm_call 훅
+]
+SCRIPT_DEST = REPO / "scripts"
 
 # 올리면 안 되는 패턴: Discord/긴 숫자 ID, 절대 홈 경로, 키·토큰 형태
 # 개인 계정명 같은 추가 금지어는 scripts/pii_local.txt (한 줄에 하나, git 제외)에 둔다.
@@ -74,14 +83,18 @@ IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store", "*.bak*", "
 
 
 def copy() -> None:
+    # 원본을 먼저 전부 확인한다 — 지우고 나서 멈추면 스냅샷이 반쯤 사라진 채로 남는다
+    missing = [HERMES / src for _, src in SKILLS if not (HERMES / src / "SKILL.md").exists()]
+    missing += [HERMES / src for _, src in SCRIPTS if not (HERMES / src).is_file()]
+    if missing:
+        for m in missing:
+            print(f"!! 원본 없음: {m}")
+        print("아무것도 바꾸지 않았다. SKILLS/SCRIPTS 목록을 고친 뒤 다시 실행.")
+        sys.exit(1)
     if DEST.exists():
         shutil.rmtree(DEST)  # 원본에서 지운 파일이 남지 않게 매번 새로 만든다
     for rel, src in SKILLS:
-        s = HERMES / src
-        if not (s / "SKILL.md").exists():
-            print(f"!! 원본 없음: {s}")
-            sys.exit(1)
-        shutil.copytree(s, DEST / rel, ignore=IGNORE)
+        shutil.copytree(HERMES / src, DEST / rel, ignore=IGNORE)
     for rel, reason in WITHHOLD.items():
         f = DEST / rel
         if f.exists():
@@ -97,6 +110,11 @@ def copy() -> None:
         src = HERMES / "profiles" / bot / "SOUL.md"
         (SOUL_DEST / f"{bot}.md").write_text(_redact(src.read_text()))
     print(f"복사: SOUL {len(SOULS)}개 → souls/ (ID 치환)")
+    for rel, src in SCRIPTS:
+        d = SCRIPT_DEST / rel
+        d.parent.mkdir(parents=True, exist_ok=True)
+        d.write_text(_redact((HERMES / src).read_text()))
+    print(f"복사: 운영 스크립트 {len(SCRIPTS)}개 → scripts/hermes/ (ID 치환)")
 
 
 _SKIP = {Path(__file__).resolve(), _LOCAL.resolve(), _REDACT_LOCAL.resolve(), _SUBS_LOCAL.resolve()}

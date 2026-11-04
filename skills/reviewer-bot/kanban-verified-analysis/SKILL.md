@@ -37,6 +37,10 @@ Real failures this caught:
 
 Report results in your own voice with your own numbers. Never relay worker text verbatim.
 
+When a reported hash differs from yours, check the algorithm before calling it a change: a
+worker's `shasum` (SHA-1 default) vs your `shasum -a 256` gives different prefixes for the
+same unchanged file.
+
 ### Grep every quoted literal in the raw source before accepting the narrative on top of it
 
 Re-deriving aggregate numbers is not enough. A report will also quote *specific artifacts* —
@@ -71,12 +75,24 @@ if per-seed sd is ~15% of the mean and the effect is ~1%, small samples are pure
   0.009 vs ≤ 0.002 for the same models), so single-seed candidate comparisons on it measure
   seed noise. Check the spread on runs you already have (re-trains of one config), then
   compare k-seed means with SE = √(sd_a²/k + sd_b²/k).
+- **A combination you find by re-analysing the eval data is a hypothesis, not a result.** Report it as "post hoc". Then validate it in a pre-registered card: fresh rows, the threshold copied unchanged, and perturbation families the discovery set did not use, with recall reported per family. Before the run, ask which family each stage is structurally blind to. A two-stage grader scored 10/10 on its discovery set and 0.57 on fresh data. Its numbers-only first stage never forwarded swapped names or dates to the stage that could catch them.
+- **Price an efficiency gate over every call in the pipeline, and do it when you write the rule.** An adoption rule that counts only the answer step's context tokens and one stage's p50 delay lets an LLM reranker "save 30%" while the rerank call itself quadruples cost and pushes end-to-end p50 from 4.4 s to 8.1 s. Write the gate as total tokens per request (all auxiliary calls included) plus user-visible end-to-end latency (p50 and p95, and the share over the product's timeout). Write comparison branches as "correct ≥ baseline", not "correct the same". A literal "same" rejects candidates that win on both axes.
+- **Never overturn a pre-registered verdict with a metric you thought of after seeing the result.** If the rule passes a candidate you dislike, approve the verdict as "adoption candidate". Put the missing metric in a separate decision table marked "rule limitation, not used in the verdict", and hand the on/off choice to the user with your advisory. Rejecting it on the new metric is the same goalpost-moving you forbid workers. A dispatched review that bounces you for it is right; retract your opinion on the card and say so to the user.
 - **Price an ensemble gain against the deployed configuration, not against one model.** A
   gain measured as "single model → k-seed average" is mostly the generic averaging effect,
   which a deployed k-fold average already holds (single fold → 5-fold +0.026; adding seeds
   on top +0.000). Before training extra members, run the cheap inference-only gate: Δ of
   (deployed set + the members you already have) vs the deployed set, with a paired CI. It
   costs minutes and can save a whole training queue.
+
+## Review a triage tool by walking the operator's documented procedure
+
+A tool's output is safe only if the procedure people follow actually reaches every risky row. When a tool sorts items into labels such as "needs review / passed / not checked", read the runbook (OPS) line that tells the operator what to read. Then trace each label through that line. One chat-session approval accepted scoring failures because they were "visible as 미검사". The runbook said "read only 검토 필요", so those rows were never read, and 2 of the 3 were real positives (recall 37/37 → 35/37). The dispatched review caught it.
+
+Fix pattern:
+- Route every failure mode (parse error, timeout) into the label humans must read.
+- State in the runbook that "not checked" ≠ pass.
+- Make the tool exit non-zero while unchecked rows remain.
 
 ## A missed criterion caused by your own spec is not a rejection
 
@@ -87,6 +103,11 @@ Verify the failures are all of the conflicting kind, approve, say in the review 
 spec was wrong, and hand the user the choice (accept the miss / relax one criterion) with
 the cost of each. Record the user's choice as `사용자 결정(override)` on the card and in the
 work log.
+
+The same applies to a size or count target that the spec's own "keep verbatim" clauses make
+unreachable. Before you write a numeric shrink target for a document (bytes, lines), add up the
+sections the spec forbids rewriting and set the target above that floor. A cleanup card once
+missed 13.5 kB only because the verbatim-protected rules alone came to about 11.5 kB.
 
 ## Before a gated card starts, fold the final-check findings into the spec
 
@@ -184,6 +205,10 @@ Bulk LLM labelling (pilot gate, session-length limits against compaction drift, 
 relabels, drift detection by position, one-shot gold evaluation) is covered in
 `references/llm-labelling-workers.md`.
 
+A note you already hold that flags a signal as suspect (e.g. "this status can be a false
+positive") is a mandatory check before building a diagnosis on that signal — skipping it is
+how a headline cause ends up refuted by the consultant instead of by you.
+
 This matters for reporting too: name your own overturned calls as explicitly as the worker's.
 A verification log that only ever catches the worker is not measuring itself.
 
@@ -199,6 +224,58 @@ A verification log that only ever catches the worker is not measuring itself.
   feature distribution doesn't match production, stop and report before sweeping"). This gate
   correctly halted a run that would otherwise have produced meaningless numbers.
 - Forbid editing originals; require new files. Require `ls`/`diff` output as evidence in reports.
+- **Give every arm of an A/B its own positive control.** A treatment that removes something
+  (an isolation flag, a feature, a dependency source) can also remove what the measurement
+  needs to run: one "no inherited packages" arm had no test runner, so it failed 47/47 and the
+  pre-registered "≥90% flip to FAIL" passed while proving nothing. Require that a known-good
+  item still passes in the treatment arm; if it does not, the arm is invalid, not a result.
+- **When a pre-registered headline count compares against a comparator you built (a custom
+  env, a tuned baseline), require its composition in every report**: how many of the count
+  come from items where the comparator deviated from default by design. Otherwise the headline
+  clears its threshold by construction, and a reader takes it for the effect.
+
+### Second-opinion consult cards (another model checks your judgement)
+
+Pick the verification tier by stakes; this user watches token cost and pushes back on any
+extra model stage that lacks evidence it catches something the cheaper tier misses:
+
+1. **Every report (no extra model):** attach the query/script behind each number so checking
+   it is a re-run, not an LLM pass, and falsify the 1–2 load-bearing claims yourself first
+   ("if this were wrong, the data would show X" → look → absent). Most of a full consult's
+   time goes into re-deriving numbers that a shipped query would have settled.
+2. **Important design decision (narrow consult):** give the consultant only the 2–3 claims the
+   decision rests on, as falsification targets, plus raw-data paths; set `--max-runtime`
+   (~20–40 min). Free exploration only for whole-structure questions — it finds side issues
+   a narrow card cannot, at roughly double the cost.
+3. **Irreversible step (final submit, replacing a shipped build):** full independent final
+   check from raw data (the 최종점검 route); don't economise here.
+
+Card rules for tiers 2–3:
+- **Independent first, then compare, in ONE card.** Give the question and raw-data locations,
+  not your conclusion; have the consultant write its own conclusion to a file, then open a
+  separate file holding your claims. Leading with your conclusions anchors it on your frame;
+  two cards double the cost.
+- **Symmetric verdicts.** Each claim → `confirmed / refuted / unverifiable` + the query/number.
+  State that "no refutation" is a normal outcome — a "find what's wrong" brief manufactures
+  weak objections, a "confirm" brief becomes a rubber stamp. `unverifiable` must name what was
+  missing and how to get it, or it becomes the escape hatch.
+- **The consultant can be wrong too.** Its verdict is evidence, not the decision: resolve each
+  disagreement once yourself on raw data, with no back-and-forth rounds (that loop is where
+  tokens leak). Track cost and refutations-that-held per consult; if three in a row add
+  nothing new, keep consults for irreversible steps only.
+- Do not adopt multi-model council/MoA-style pipelines (parallel answers → peer ranking →
+  chair) for routine work: take only the zero-cost element (independent-before-compare).
+- Forbid code, push, submit and decisions; require measured vs estimated labels; keep DB
+  access read-only (`sqlite3 'file:<db>?mode=ro'`) on live boards.
+- For a follow-up "anything else?" consult, put every done, in-flight and rejected item in an
+  exclusion list. Restate the target in the corrected terms from the first consult (e.g. a
+  within-band rank, not a display step). Require at least N candidates, each with evidence,
+  expected delta, cost and a numeric go/stop. Tell the consultant to say plainly when none
+  qualifies.
+- When the result lands, re-derive the one or two numbers that overturn your earlier statement
+  before relaying them. Lead the reply with your own corrected claim ("I said X; it is Y"), then
+  the consultant's points. A consultant can also correct its own previous consult, so check the
+  new claim against data, not against the older card.
 
 ## Kanban operational pitfalls
 
@@ -230,8 +307,8 @@ A verification log that only ever catches the worker is not measuring itself.
   For remote jobs (remote jobs) key on each job's terminal status instead
   (`kernels status` → not RUNNING/QUEUED for every kernel), with the same flag-then-act
   order; a worker that blocked "waiting on the remote platform only" otherwise sits until someone looks.
-- Subscribe notifications with `notify-subscribe --delivery-mode wake` so the orchestrator is
-  woken to verify and summarize, instead of worker text being pushed to the user raw.
+- Subscribe the final/decision card with `--delivery-mode wake` so the orchestrator verifies and
+  summarizes; intermediate coder/helper cards get `notify` (user cost rule 10/27).
 - A completed card's notification summary is **truncated** — always open the card and the
   artifacts rather than acting on the notification text.
 - **`kanban_request_changes` is refused ("task is not in an active review run") once the card
@@ -267,6 +344,23 @@ A worker reporting "my recomputation disagrees with your spec" is doing the righ
 verify *which* side was wrong before accepting the deviation; the spec is sometimes correct and
 the worker's predicate subtly broader. Also credit the reverse case: when the worker's value
 corrects your spec (e.g. a sign convention), say so and keep their version.
+
+## Summarizing a large work log into one document
+
+Use this when the user wants "everything we did, methods, results and code" from a log too big to
+read in one pass (hundreds of sections).
+1. Split the log into about 7 chunks of equal **bytes**, with cut points snapped to section
+   headings. Use `grep -n '^## '` together with cumulative byte counts.
+2. Spawn one subagent per chunk, plus one for the submission record, all in one parallel call.
+   Give each the exact line range, a fixed per-section template (purpose / method / measurement
+   conditions / results / recorded verdict / code paths), "copy numbers exactly", "`-` when
+   absent", "no opinions", and a header comment with the section count.
+3. Check the section counts against the heading count. Then string-match every decimal in the
+   chunk outputs against the source, and report "N numbers, 0 missing" in the document header.
+4. Write the overview yourself (timeline of rules, data versions, member table, ensemble
+   lineage, code map). Then concatenate, demoting the chunk headings one level.
+- When the user says "판단은 제외", keep the facts document free of evaluation. Put judgment
+  (gaps, weaknesses, recommendations) in a **separate** document and cross-link the two.
 
 ## Deliverables
 

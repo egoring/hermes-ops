@@ -1,0 +1,4 @@
+# Worker routing pitfalls
+
+- **helper-bot cannot run scripts (single-query mode).** Lookups that loop over many CLI calls (e.g. license/metadata for 20+ the remote platform datasets) block it with `needs_input`. Give those to coder-bot with "조회 전용, 리뷰 없음, kanban_complete로 끝냄" in the body. Keep helper-bot for single-call lookups and short summaries. If a helper card already blocked this way, `assign <id> coder-bot` + `unblock` (after confirming no live run) instead of recreating it.
+- **Spot-check helper output before relaying.** A helper inventory put title version numbers (0.883) in a score column that cannot exceed the LB top (0.737), and reported 27/36 licenses as missing because it read the wrong key: `platform-cli datasets metadata <ref>` stores them at `info.licenses[].name`. A plausibility check against a known bound catches this in one minute.

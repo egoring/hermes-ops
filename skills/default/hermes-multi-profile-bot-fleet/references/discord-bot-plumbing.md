@@ -86,11 +86,17 @@ rebuild a connected adapter); they then hold in existing threads as well.
 ## "The bot isn't answering" — triage order
 
 Work from the gateway outward. Each step rules a layer in or out:
-1. `gateway_state.json` → each `<profile>:discord` `state`/`error_code`. A `fatal`
-   `discord_websocket_health_stale` adapter retries on its own about every 5 min. The log shows
+1. `gateway_state.json` → each `<profile>:discord` `state`/`error_code`. Classify by code first:
+   `discord_connect_error` with `Cannot connect to host discord.com:443 [No route to host]` is the
+   **host network** (usually several bots at once; confirm with `curl https://discord.com/api/v10/gateway`
+   and `ping 1.1.1.1`, check `netstat -rn -f inet6` for a default route via `utun*`) — nothing to
+   fix in Hermes, adapters reconnect within ~5 min of recovery. `discord_websocket_health_stale`
+   (`socket_closed`, `latency_exceeded`) is **gateway lag** (see Recurring disconnects). A `fatal`
+   adapter retries on its own about every 5 min. The log shows
    `Secondary discord reconnect retry in 300s (profile: <bot>)`, and success is
    `✓ discord reconnected (profile: <bot>)`. Check the token with `GET /users/@me` and the
-   `session_start_limit.remaining` from `GET /gateway/bot` before blaming it.
+   `session_start_limit.remaining` from `GET /gateway/bot` before blaming it; with both fine,
+   waiting for the next retry is the fix.
 2. `grep "inbound message: platform=discord user=<name>"` in `gateway.log`. No line after the
    user's last answered message means it never reached Hermes. The usual causes are another
    thread, a channel post without a mention, or a send during a disconnect window. Ask them to
@@ -108,7 +114,12 @@ Recurring disconnects: count `Can't keep up … behind` and `[Discord] Disconnec
 profile before proposing a cause. Then put the warning timestamps next to the cron runs and kanban
 events in the preceding minute. Report the correlation as a correlation. Prefer trimming
 finished-target cron jobs over a full gateway restart, which reconnects every bot and needs
-approval.
+approval. Remedies in order of cost: (1) disable finished-target cron jobs and lengthen poll
+intervals; (2) move monitor scripts out of the gateway to launchd + a notify script; (3)
+`gateway.standalone: true` for the heaviest bot — it shields the SIBLINGS from that bot's load but
+not the bot itself, adds a process (~600 MB), and kanban notify delivery across processes must be
+verified first. Splitting one bot into two profiles does nothing under multiplex (same process,
+one more connection).
 
 ## "Bot is typing" is not proof of token spend
 

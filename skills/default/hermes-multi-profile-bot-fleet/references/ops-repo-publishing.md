@@ -86,8 +86,20 @@ broken refs, scripts run, README/LICENSE). Then:
    (`~/work`, `~/work/webapp`, board `<보드>`/"메인 보드") — runbook commands, diagram labels,
    metric-table board names, decision-record wording and script usage lines included. Keep
    measured numbers; only the identifying names change.
-3. Make the checker scan the **whole repo** (minus `.git`, the local deny/redact lists and the
-   local-only changelog), not just the copied folders — docs and scripts leak too. Match
+3. Make the checker scan **every file git would publish** — `git ls-files -co --exclude-standard`
+   (tracked + untracked-not-ignored) minus the local deny/redact/subs lists — not just the copied
+   folders (docs and scripts leak too) and not a raw `rglob` (it scans git-ignored local files
+   such as `projects/<real>.md` and `reports/`, so adding a project word to the deny list makes
+   the gate fail on files that never ship).
+   **Add each active project's name to the deny list the day the project starts**, not after a
+   leak: the bots keep extending the snapshotted skills with new examples ("re-upload a <Platform>
+   Dataset", "`<platform-cli> kernels list`"), and a word missing from the deny list passes the
+   gate. A separate ad-hoc grep run after `sync` is NOT a gate — only the checker's exit code
+   blocks the commit. When a leak does land: add neutral substitutions to `public_subs_local.txt`
+   (longest phrase first, bare word last), add the word to `pii_local.txt`, re-sync, back up with
+   `git bundle create <file> --all`, `git reset --soft <parent>` and recommit, then
+   `git push --force-with-lease=main:<leaked-sha>` and verify from an anonymous clone with
+   `git log --all -i -S <word>` (expect nothing). Match
    private keys by header (`-----BEGIN [A-Z ]*PRIVATE KEY-----`), never the words "private key"
    under `re.I`, or prose about keys trips it. Don't deny-list the public GitHub handle — it is
    already in the repo URL and belongs in LICENSE.
