@@ -80,6 +80,30 @@ q "select assignee,round(avg((completed_at-started_at)/60.0),1) from tasks where
 q "select count(*),sum(model_override is not null),sum(reasoning_effort is not null),sum(workflow_template_id is not null) from tasks"
 ```
 
+Count work per profile from `task_runs`, not `tasks.assignee`: `request-review --reviewer`
+reassigns the card, so finished tasks show the reviewer as assignee and make the implementer look
+idle. Per-run numbers (last 30 days, all boards in one loop):
+
+```bash
+q "select profile,count(*),group_concat(distinct outcome),round(avg((ended_at-started_at)/60.0),1)
+   from task_runs where started_at>strftime('%s','now','-30 days') group by 1"
+q "select profile,outcome,count(*) from task_runs where started_at>strftime('%s','now','-30 days')
+   and outcome not in ('completed','review_requested') group by 1,2 order by 3 desc"
+# bucket blocked runs by their summary: waiting vs approval-gate vs real decision
+q "select count(*), sum(s like '%RUNNING%' or s like '%QUEUED%' or s like '%대기%' or s like '%waiting%'),
+   sum(s like '%approval%' or s like '%protected%' or s like '%Tirith%')
+   from (select coalesce(summary,error,'') s from task_runs where outcome='blocked')"
+# crashes that died mid-wait (error carries the worker's last output)
+q "select count(*) from task_runs where outcome='crashed' and error like '%sleep %'"
+```
+
+Typical finding: a large share of `blocked` is "job still RUNNING/QUEUED" and many `crashed`
+runs died inside an in-session `sleep` poll — fix with schedule-and-wake (see
+`scheduled-alerts.md` → auto-wake), not with more retries. `gateway.log` warnings like
+"dispatcher stuck" need a per-day count before being called current; a burst on one old day is
+history. Before proposing a rule, grep the shared + per-project AGENTS.md for an existing one
+(and check per-project files for conflicting wait/poll rules, since they win on conflict).
+
 Then `hermes kanban create --help` to see per-task features the fleet never uses (`--model`,
 `--skill`, `--goal`, `--max-runtime`, `--completion-contract`) and `hermes kanban --help` for
 `stats`/`specify`/`decompose`. Classify causes before proposing fixes: read every

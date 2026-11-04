@@ -106,6 +106,13 @@ EOF
 | 주간 지표 | 월 09:10 | `weekly_metrics.py` | 핵심 수치 + 지난주 대비. 원본 표는 `reports/weekly/<주차>.md` (로컬 전용) |
 | effort 변경·적용 + 최종점검 | 5분 | `effort_watch.py` | 📋 fable-bot 최종점검 배정, 🧠 실행 시작, 🎚 태스크 effort 지정(`reasoning_effort_set`), ⚙️ 프로필 기본 effort 변경(멘션), ✅ 봇 세션이 기본과 다른 effort로 실제 시작됨. 말로 요청한 최종점검이 xhigh로 돌았는지 확인용 |
 | 리소스 감시 / 사용량 보고 | 09·21시 / 09시 | `resource_alert.py` / `usage_report.py` | 기존 |
+| 대기 카드 깨우기 | 15분 | `kanban_wake.py` (default 프로필) | `SCHEDULED_UNTIL`이 지난 scheduled 카드를 다시 배정. 12회 넘으면 알림만 (`01_운영구조.md` §5.7) |
+
+에이전트 cron (토큰 사용):
+
+| 작업 | 주기 | 프로필 | 내용 |
+|---|---|---|---|
+| 규칙 파일 진단 | 월 09:00 | coder-bot (Sonnet) | `claude-md-improver` 스킬로 AGENTS.md·SOUL.md 11개를 점수화해 Discord로 보고. **읽기 전용** — 수정은 사용자 지시 후. Discord 전송 cron은 Discord 토큰이 있는 봇 프로필에 둔다(default에 두면 `blocked_config`) |
 
 전송은 공용 `_notify.py`(helper-bot 계정, 알림 채널). 복원: `hermes import ~/.hermes-backups/<zip>`.
 테스트: `kanban_watch.py --dry-run --since-id <과거 id>` / `weekly_metrics.py --dry-run` / `effort_watch.py --dry-run --since <epoch>`.
@@ -123,3 +130,21 @@ EOF
 | 계속 실패 | — | `hermes gateway restart` (봇 4개 동시 재연결, 사용자 승인 필요) |
 
 봇 `.env`의 `DISCORD_BOT_TOKEN`은 **한 줄만** 둔다. 여러 줄이면 마지막 줄이 쓰이고, 앞줄에 다른 봇 토큰이 섞여 있으면 스크립트가 엉뚱한 봇으로 보낼 수 있다(10-01 정리).
+
+## R10. 스킬 공유·추천 점검 (`01_운영구조.md` §3.1)
+
+```bash
+# 1) 봇이 공유 스킬을 읽는지 (external 줄 수, kanban 전용 2개는 평소 빠질 수 있음)
+for p in coder-bot reviewer-bot helper-bot fable-bot; do echo "$p $(COLUMNS=250 hermes -p $p skills list | grep -c external)"; done
+# 2) 훅 등록·동의 (✓ allowlisted 여야 함)
+hermes -p <프로필> hooks doctor
+# 3) 추천이 실제로 도는지 (플랫폼·프로필·후보가 한 줄씩)
+tail -20 ~/.hermes/logs/skill_recommend.log
+# 4) 특정 질문의 점수 확인
+python3 ~/.hermes/hooks/skill_recommend.py --explain "질문" --profile <프로필>
+```
+
+- 새 프로필에 훅을 붙일 때: `config.yaml`에 `hooks.pre_llm_call` 추가 → allowlist 등록(무인 게이트웨이는 동의 프롬프트를 띄우지 않고 훅을 건너뛴다). `hermes --accept-hooks ... hooks test`는 동의를 **기록하지 않는다** — `agent.shell_hooks._record_approval(event, command)`를 그 프로필 `HERMES_HOME`으로 호출해 기록했다.
+- 훅 명령 문자열을 바꾸면 allowlist 키도 바뀌어 다시 등록해야 한다.
+- 끄기: 프로필 `config.yaml`의 `hooks:` 블록 삭제 또는 `hermes -p <프로필> hooks revoke "<command>"`.
+- 추천이 엉뚱하면 `--explain`으로 걸린 단어를 보고 훅의 `STOP`/`GENERIC` 목록이나 hermes-hub `skill-search.ts` 동의어를 고친다.

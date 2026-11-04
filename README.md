@@ -30,7 +30,8 @@
 | `scripts/kanban_metrics.py` | 보드 지표 (읽기 전용) | `python3 scripts/kanban_metrics.py --days 7` |
 | `skills/` | 운영용 자작 스킬 스냅샷 (원본은 `~/.hermes`) | 백업·다른 PC 이전 |
 | `souls/` | 봇 4개 SOUL.md 스냅샷 (개인 ID는 자리표시자로 치환) | 역할 규칙 원문 확인 |
-| `scripts/sync_skills.py` | 스킬·SOUL 복사 + ID 치환 + 공개 보류 처리 + 저장소 전체 개인정보 검사 | 스킬이 바뀐 뒤 커밋 전 |
+| `scripts/sync_skills.py` | 스킬·SOUL·운영 스크립트 복사 + ID 치환 + 공개 보류 처리 + 저장소 전체 개인정보 검사. 원본이 하나라도 없으면 아무것도 안 바꾸고 멈춤 | 스킬이 바뀐 뒤 커밋 전 |
+| `scripts/hermes/` | 운영 스크립트 스냅샷: `kanban_wake.py`(대기 카드 깨우기), `skill_recommend.py`(스킬 추천 훅) | `docs/01_운영구조.md` §3.1, §5.7 |
 
 ## 스킬·SOUL 동기화
 
@@ -45,7 +46,9 @@ git add -A && git commit -m "skills sync" && git push
 |---|---|---|
 | `skills/default/hermes-multi-profile-bot-fleet` | `~/.hermes/skills/devops/…` | 봇 fleet 운영 전반 (게이트웨이, 리뷰 루프, 알림) |
 | `skills/reviewer-bot/kanban-*` (4개) | `profiles/reviewer-bot/skills/…` | 태스크 위임·검증 분석·오케스트레이션 |
-| `skills/coder-bot/shared-thread-scope-discipline` | `profiles/coder-bot/skills/…` | 공유 스레드에서 남의 일 안 가져가기 |
+| `scripts/hermes/` | `~/.hermes/scripts/kanban_wake.py`·`_notify.py`, `~/.hermes/hooks/skill_recommend.py` | 대기 카드 깨우기, 스킬 추천 훅 (ID 치환) |
+
+(coder-bot `shared-thread-scope-discipline`은 11-04 원본이 보관(`.archive`)돼 스냅샷에서 뺐다.)
 
 SOUL은 복사할 때 `<@USER_ID>`, `<ID>`, `<USER_NAME>`으로 바뀐다 (원본은 그대로). 추가 치환어·금지어·공개용 문구 치환은 git에서 제외된 `scripts/redact_local.txt`, `scripts/pii_local.txt`, `scripts/public_subs_local.txt`에 둔다. **저장소의 SOUL을 원본에 다시 복사하지 말 것** (알림이 깨진다).
 

@@ -1,0 +1,9 @@
+# Chat-session findings vs. an already-running review run
+
+**Rule:** if you post a 🔴 finding as a card comment while that card's review run is already `(running)`, read the final approval/BLOCK text and confirm it explicitly addresses your finding. If it does not, do not treat the approval as covering it. Open a small follow-up card (`--parent <approved card>`) with the repro and closed-rule fix, and hold deployment until that follow-up card is approved.
+
+**Why:** the review run may have loaded the card before your comment landed, or it may record your leak as an "accepted residual". Example: aitop100 PX5. The chat session showed that names ending in 비/료 (김은비) leaked through a suffix exemption. The run-2 approval listed it as a known residual instead. Follow-up card PX6 closed it with a closed cost-term list plus an accounting-header exemption, and the leak count went to 0/50.
+
+**Steer the live review run instead of waiting for it.** When your chat check finds 🔴 items before the run has posted a verdict, write a comment that tells the run exactly what to do: "review worker: request-changes [round N/3] with these items only, add nothing else", then the numbered items, each with its evidence (the command output that proves it) and the exact fix. Mark the items that are your own spec errors as such. The run then bounces with your reasons in one round, instead of approving and leaving you a follow-up card. The default boilerplate "approve only" is for the no-🔴 case only.
+
+**Also:** when your own earlier review/spec introduced the loophole, say so in the follow-up card and in the user report. The user values that attribution.

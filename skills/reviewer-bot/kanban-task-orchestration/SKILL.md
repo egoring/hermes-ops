@@ -66,6 +66,12 @@ These are inconsistent across subcommands and each mistake costs a round trip:
   `comment` fails as an unrecognized argument.
 - The board selector is `hermes kanban --board <slug> <verb>` — **before** the subcommand.
 - `--parent` is repeatable; `link` takes bare ids (`link <parent_id> <child_id>`).
+- `block` refuses a card that is still `todo`/`ready` ("cannot block"). To hold a queued card (e.g. its GPU host must restart first), use `hermes kanban --board <b> schedule <id> "<reason>"` (status `scheduled`, reason appended as a comment); release it with `unblock <id>`, which returns it to `todo`/`ready`.
+- **A `scheduled` card never wakes itself.** A "SCHEDULED_UNTIL=…" line in the reason is only a note. When a worker parks a card to wait on a long external job, add an end-of-job watcher in the same turn: a script-only cron that reads the job log and runs `unblock` when it sees an end marker. Without one, the card sits idle after the job finishes until someone happens to look.
+  - Make the watcher safe across reruns. It should read only log lines after the latest start marker, because an end marker left by the previous attempt would otherwise unblock the card the moment it is parked again.
+  - It should act only when the card is `blocked`, `scheduled` or `triage`, and write its done-marker only after it has actually woken the card. Do not run it by hand while the card is parked.
+- `promote` only accepts `todo` or `blocked` cards (`--dry-run` shows why it refuses). To restart a card parked by a review run, `assign <id> <implementer>` first (it stays on the reviewer otherwise), then `unblock <id>`; the dispatcher claims it within a tick.
+- Cards that end in `kanban_complete` with no review step (helper-bot docs, records) are where wrong numbers slip through unseen. Write every value into the body, and diff the committed numbers against the source yourself when the completion notice arrives.
 
 ## Steering a card that is already running
 
@@ -102,6 +108,9 @@ Do not claim the running agent "has been redirected."
   "`kanban_block` with a summary for user approval instead of `kanban_complete`," the new
   card carries the same clause. Inconsistent completion contracts across cards on one
   board make the board unreadable.
+- **Cost rule (10/27) overrides the next bullet for intermediate coder/helper cards:** subscribe
+  them `notify`; `wake` only for final/decision/fable cards (review_requested wakes were 36% of
+  Discord cost; reviewing is the kanban review worker's job).
 - **Route worker results through yourself, not straight to the user.** Subscribe with
   `--delivery-mode wake` (not `notify` or `notify+wake`) and set `--notifier-profile` to
   your own profile. `notify` pastes the worker's own summary into the chat verbatim, so a

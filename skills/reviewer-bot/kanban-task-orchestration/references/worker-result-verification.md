@@ -25,6 +25,21 @@ Verify first, then report.
    scratch dir is legitimate for read-only analysis, but only if the report says so.
 6. **Re-read the prohibitions section of the card** and confirm none were violated —
    production code left modified on an analysis card, rejected approaches re-proposed.
+7. **Give judging and gate code negative controls, not only reproduction checks.** For a
+   verdict/adopt function, feed a known failure (an optional criterion set to fail, the
+   candidate and baseline swapped) and require FAIL. For a format checker, feed a bad label,
+   a duplicate id and a null, and require FAIL on each. Matching the expected numbers only
+   shows the gate passes good input, and a gate that never fails stays invisible until it
+   waves a bad candidate through. Run whatever the worker said it could not run.
+8. **Check that a stress test exercises the branch it claims to test.** After the
+   perturbation, print the property the method keys on (group size, row count, threshold).
+   One injection grew groups past the method's size limit, so those groups went to the
+   fallback path. The "robust" verdict for that variant then measured the fallback, not the
+   variant. A faithful implementation of a broken test is a spec defect: approve it, open a
+   follow-up that replaces the test, and mark any choice made from it as provisional.
+9. **Read the gate's return value, not only its printout.** A verdict function can print
+   "not final" while returning `adopt=True` when optional criteria are left unset. Tell
+   downstream cards to pass every applicable criterion explicitly.
 
 ## Reporting
 

@@ -346,6 +346,10 @@ Intake procedure:
    when the user says "just use this" — finish the non-secret setup and leave the slot empty.
 2. **The user writes the new value themselves**, in their terminal, straight to the file the tool
    reads — a downloaded credential file moved into place is best, since nothing is ever typed.
+   When a bot asks the user to put an API key at a path, prepare the slot for them: `mkdir -p`
+   (chmod 700), `touch` + chmod 600, then `open -e <file>` so they paste one line and save; also
+   give the hidden-input alternative (`read -rs "?key: " K && printf '%s' "$K" > <file> && unset K`).
+   Point them to the provider console's spend limit / prepaid-credit setting in the same reply.
 3. **Verify without ever printing the value.** Check shape only, then prove it by exercising an
    authenticated command:
 
@@ -579,7 +583,17 @@ Spot-check its numbers yourself, then give the user a paste-ready first message 
 thread.
 
 Cron jobs are not a model tier: check `cron/jobs.json` per profile before claiming which bot
-"does cron". Monitoring/usage reports should be `no_agent` scripts (zero tokens, deterministic);
+"does cron". A job's delivery uses its OWN profile's platform credentials — the multiplexed
+gateway does not lend a bot's token to another profile's cron. A default-profile job with
+`--deliver discord:<ch>` fails preflight (`blocked_config … has no gateway credentials`) when
+only the bot profiles hold `DISCORD_BOT_TOKEN`. Create Discord-delivered jobs in a bot profile
+(`hermes -p <bot> cron create …`; the job then runs on that bot's `model.default`, or pin with
+`--model`), copy any skill it uses into `profiles/<bot>/skills/` (a catalog install lands only in
+the chat's profile), remove the failed default copy, then test with `hermes -p <bot> cron run
+<id>` and prove delivery from `profiles/<bot>/cron/deliveries.db` (`status=delivered`, empty
+`error`) — not from the run's "succeeded" line. Don't copy a bot token into the default `.env`
+to fix it: two connections on one token knock each other off.
+Monitoring/usage reports should be `no_agent` scripts (zero tokens, deterministic);
 put a job on the cheap bot's profile with a model only when its output needs interpretation or
 summarizing.
 
@@ -592,15 +606,32 @@ summarizing.
   disconnect correlation).
 - `references/scheduled-alerts.md` — zero-token cron alerts, edge-triggered notification, the
   standard fleet automation set (kanban anomaly watch with evidence capture, daily
-  `hermes backup`, weekly metrics post, effort change/apply watch) and how to test each before
+  `hermes backup`, weekly metrics post, effort change/apply watch, kanban auto-wake for
+  `SCHEDULED_UNTIL=` parked cards) and how to test each before
   scheduling.
-- `references/dashboard-service.md` — running the web dashboard, autostart, the env trap, and
-  watching fleet work live (Kanban tab, `kanban watch`/`tail`, tmux split).
+- `references/dashboard-service.md` — running the web dashboard, autostart, the env trap,
+  watching fleet work live (Kanban tab, `kanban watch`/`tail`, tmux split), and building a
+  project-centric view on Hermes data (plugin tab vs separate app; never mount WAL DBs into
+  containers; design → private app repo → cluster-free Phase-0 checks; guiding the user to
+  enable Docker Desktop Kubernetes; in-cluster Phase-0 probes; Phase-1 build order, rule-chain
+  parity check, board→project mapping when `default_workdir` is null, non-root Secret
+  permissions, launchd/background-shell traps; Phase-2 summary batch: message filters, dry-run
+  first, token-estimate ratio, fact-check method, freshness (hourly runs, same-day merge,
+  missing-field defaults, overlap guard, thread→project pinning); progress percentages — score/checklist via
+  heartbeat `진행 k/N`/recent completion/time elapsed, and why plain completion rate is useless;
+  skills page — inventory/source/per-profile drift/usage from `skill_view` calls, hash-gated
+  Korean summaries, functional grouping (name rules over folder categories); skill search — client filter + host-side body search, Korean→English
+  synonyms, word-boundary matching for short terms; keeping it project-agnostic; ops page from
+  `gateway.error.log` + cron files; usage page spreading cumulative per-session cost by day;
+  launchd urgent alerts outside the gateway, mention-masking trap; cost alerts from snapshot
+  diffs; moving the summary batch from an API key to the Claude subscription via the official
+  CLI in the container).
 - `references/fleet-design-doc.md` — writing/revising the fleet architecture document, and
   evolving the design from kanban metrics (reject rate, crashes, unused task features).
 - `references/gateway-resource-usage.md` — measuring gateway CPU/RAM right (CPU-time deltas,
-  sleep bias), the macOS osascript-wrapper idle-CPU cost and how to remove it, and whole-machine
-  battery triage (energy ranking, hung apps, pmset battery settings).
+  sleep bias), the macOS osascript-wrapper idle-CPU cost and how to remove it, whole-machine
+  battery triage, "can this Mac run it 24/7" capacity check (swap, Docker VM size, disk), and
+  safe Docker disk cleanup (A/B/C groups, DB dump before volume delete).
 - `references/ops-repo-publishing.md` — keeping ops docs project-agnostic in their own repo,
   kanban hygiene (notify-subscription cleanup), pushing the repo + own skills to GitHub without
   leaking IDs, going public (withholding live-project content, squash, per-folder commit
@@ -620,6 +651,16 @@ for a fresh thread. Before listing uncommitted files as bot leftovers, check whe
 kanban task produced them (`kanban list` + task workspace) — they may vanish when it finishes.
 
 The reviewer bot also unblocks and re-scopes tasks on its own. Before the operator acts on a blocked task, read the events and comments that came after the block: `hermes kanban --board <b> show <id>`, or `task_events` with `id >` the block event's id. It may already be unblocked and running under a new comment that overrides the body (e.g. "write a draft, not the file"). If the operator acted anyway, report the overlap and reconcile the two outputs; do not re-run `unblock`.
+
+## Reading Hermes DBs from the shell
+
+Never point the `sqlite3` CLI at a path you have not checked exists — it creates a 0-byte DB file
+on open, and every reader that globs `kanban/boards/*/kanban.db` (dashboard host reader, watch/wake
+scripts) then crashes on `no such table: tasks`. Loop boards with `[ -f "$db" ] || continue` and
+open as `sqlite3 "file:$db?mode=ro"`; in Python use `sqlite3.connect(f"file:{db}?mode=ro",
+uri=True)` after `db.exists()`, and skip DBs without a `tasks` table. If a dashboard or script
+breaks right after an inspection pass, look for fresh 0-byte `kanban.db` files first
+(`find ~/.hermes/kanban -name kanban.db -size 0`).
 
 ## Full health check ("전체적으로 확인")
 
@@ -644,5 +685,8 @@ decision plus the reason and the exact next action, not a re-listing of the opti
 Korean, direct, peer tone. Lead with the finding, then the evidence table. When the user asks
 "measure again", re-measure fresh (new deltas, same method) and compare against the previous
 numbers in the table — including correcting an earlier estimate that the new data disproves. State measured
-numbers (PIDs, byte counts, HTTP codes) rather than "it should work now". When you were wrong
+numbers (PIDs, byte counts, HTTP codes) rather than "it should work now". Never report a
+check as passed from `$?` after a pipe (`cmd | tail -5; echo rc=$?`) — that is the last
+command's status, so a crashed `tsc`/test run reads as rc=0; run the check unpiped, or use
+`set -o pipefail` / `${PIPESTATUS[0]}`, and read its own output for the pass line. When you were wrong
 earlier in the session, say so plainly in one line and correct it — do not quietly restate.

@@ -12,6 +12,8 @@ metadata:
 For running work as an analysis/design profile that delegates implementation to a
 coder profile via `hermes kanban`.
 
+Stuck cards/refused transitions: `references/stuck-cards.md`. Approved handoffs that stall between turns: `references/stall-watchdog.md`. wake vs notify cost: `references/notify-token-budget.md`. fable: `references/fable-handoff.md`.
+
 ## Role boundary
 
 **Never edit files yourself.** Not even a one-line revert or a cleanup `rm`. If a
@@ -83,8 +85,10 @@ in chat. Update any sibling card that was gated on the deferred step in the same
   catches constants taken from memory (domain constants were wrong until checked against the
   source module). Name the probe file in the card as the reference implementation, and forbid
   importing it from the deliverable.
-- **Subscribe to the coder card with `--delivery-mode wake --notifier-profile <self>`** right after
-  creating it, so its completion comes back to you for re-verification instead of being relayed raw.
+- **Subscribe intermediate coder/helper cards with `--delivery-mode notify`** (user rule 10/27):
+  their review is done by the kanban review worker, and a wake on `review_requested` cost 36% of
+  Discord spend. Use `wake` only for cards needing a user decision, a phase's final card, and fable.
+  Wake kinds are fixed in code (upstream #136614).
 - **Embed expected reproduction values** (exact means, per-seed deltas, counts) and say
   "if these don't reproduce, the implementation is wrong — stop and report". This turns
   a self-report into a checkable claim. Compute every embedded count with a real parser
@@ -93,9 +97,17 @@ in chat. Update any sibling card that was gated on the deferred step in the same
   against your wrong number.
 - **List already-rejected approaches by name** with a pointer to where they were rejected,
   so the worker doesn't re-propose them. Do the same search for your own design before
-  writing it: grep the phase docs and data dirs for the same component (labeller, mapping,
-  loss). A design that silently repeats a failed phase costs a full checker round, and the
-  checker will flag it as 🔴.
+  writing it: grep the phase docs, data dirs AND `src/` for the same component (labeller, mapping,
+  loss, augmentation/transform). A design that silently repeats a failed phase costs a full
+  checker round, and the checker will flag it as 🔴. When an earlier implementation exists,
+  cite it in the card as the reference instead of re-deriving the definition from memory.
+  For a geometric augmentation on a multi-view input (several planes/series of one study
+  fused by one model), define it so every view describes the same transformed object: a
+  left/right mirror flips the in-plane width axis of the planes that show L/R, AND reverses
+  slice order (channel order + position = 1 − pos) of the plane whose slice axis is L/R.
+  Flipping only some views feeds the model contradictory views, so a FAIL would wrongly
+  reject the augmentation itself. Anatomical label names (medial/lateral) do not swap under
+  a mirror.
 - **A card that spends the user's paid API credit** (LLM labelling, hosted inference) gets a
   usage-based pilot gate with an extrapolated full-run cost cap, a cumulative cap checked before
   every batch, a pinned model id (stop if missing, never substitute), and a key-hygiene clause:
@@ -161,8 +173,9 @@ in chat. Update any sibling card that was gated on the deferred step in the same
   workers otherwise both start a bench or push on the same box, and each run's timing
   contaminates the other. Write remote process checks as `pgrep -f "src/[t]rain_v"`: a plain
   pattern inside an `ssh '...'` string matches the ssh command line itself, so the count is
-  never 0 and a queue guard aborts on a phantom process. The same applies the other way round: a worker's smoke or test run whose command line matches a waiter's `pgrep` pattern (e.g. `train_b2o` inside `train_b2o_all_smoke`) keeps the waiter blocked. Give smoke runs a name outside every live waiter pattern, or tell the worker which patterns to avoid. A completion-wake cron that waits for "trainer count 0" keyed on the trainer script name never fires when the next queued run uses the same script, because a chained launcher starts it seconds later. Key such waits on the run's own `--out <dir>` string plus its log's `eval rc=` line. The same applies to a one-shot "is the run finished" cron that requires `pgrep -fc <trainer script> == 0`: when a chained launcher starts the next run on the same script within seconds, the count never reaches 0, so the cron never fires and the verdict waits for a human. Check `eval rc=` in that run's own launcher log alone, and use `pgrep -f -- "--out <dir>"` for the liveness test.
+  never 0 and a queue guard aborts on a phantom process. The same applies the other way round: a worker's smoke or test run whose command line matches a waiter's `pgrep` pattern (e.g. `train_b2o` inside `train_b2o_all_smoke`) keeps the waiter blocked. Give smoke runs a name outside every live waiter pattern, or tell the worker which patterns to avoid. A completion-wake cron that waits for "trainer count 0" keyed on the trainer script name never fires when the next queued run uses the same script, because a chained launcher starts it seconds later. Key such waits on the run's own `--out <dir>` string plus its log's `eval rc=` line.
   When two coder cards work in the same git repo at once, write `git add <own paths>` only (never `-A` or `.`) and name the other card's file glob as off-limits. Otherwise one card commits the other's half-built files. When the user asks "run it if it does not overlap with card X", check slug, inputs, machine and repo yourself, put the result into the body as these ownership lines, and dispatch in the same turn.
+  When the user says one item is "already requested" somewhere you cannot see (another thread or bot), do not create it. Search every board (`kanban boards list`, then `list` per board), `kernels list --mine --sort-by dateRun`, `git log` and the notebooks dir for its slug or variable. Report what you found, including "nothing visible". Dispatch only the other items. Fence them off in the body: name the item as out of scope, forbid its slug, folder and name patterns, and wait if the remote platform concurrency is at 2. Then ask where it was requested, so its result can be wired into review and submit. If a later status check still finds no trace of it (no kernel, no card), say so in that report; when the user then says to take it over, re-run the same search and create it under the slug and phase number you had reserved for it, so names stay collision-free.
   RAM is a shared resource too. When two cards each plan a CPU memory test (a synthetic buffer-growth test, a smoke run) on a box whose RAM a training job already holds, they can together OOM-kill the training. Post a comment on both cards, overriding the body:
   - run one test at a time, with a `pgrep` check for the other card's test first
   - shrink the synthetic size to a few GB
@@ -170,7 +183,8 @@ in chat. Update any sibling card that was gated on the deferred step in the same
   - afterwards, confirm the training log still advances
   Do not ask for `ulimit -v` around torch code. The virtual-address cap breaks `import torch` (ImportError) long before RSS gets near it. Use the size and available limits instead.
 - **If a WSL box hard-hangs (ping and ssh both dead, then `uptime -s` shows a reboot), check the Windows host drive that holds `ext4.vhdx` before blaming co-running jobs.** `df -BG /mnt/c` is the number that matters. WSL's own `/` reports hundreds of GB free while the vhdx cannot grow on a full C:. The signature is `getpwnam(...) failed 5` (EIO) when `wsl` starts. Two hangs blamed on GPU training next to a tar-extracting cache build were C: at ~0 GB: both jobs were writing fast at that moment. Locate the vhdx with `ls -l /mnt/c/Users/*/AppData/Local/wsl/*/ext4.vhdx`. Its size ≈ WSL usage, so deleting inside WSL plus `fstrim` reclaims little. The space has to come from Windows or from deleting large WSL dirs.
-  Guard disk with a low hard floor that stops work, not a high floor that refuses to start. This user set the rule: warn and stop at < 5 GB free; starting is fine while he frees space. Implement it as a no-agent cron every 10 min. It reads `df /mnt/c`, `pkill -TERM`s the cache builder and trainers (skip-existing builders and `resume.pt` trainers make this safe), and @-tags once per episode, re-arming above ~15 GB. Put the same floor in the card body.
+  Guard disk with a low hard floor that stops work, not a high floor that refuses to start. This user set the rule: warn and stop at a floor he chooses (currently < 2 GB free); starting is fine while he frees space. Implement it as a no-agent cron every 10 min. It reads `df -BM /mnt/c` (MB, since `-BG` rounds up), `pkill -TERM`s the cache builder and trainers (skip-existing builders and `resume.pt` trainers make this safe), and @-tags once per episode, re-arming above ~15 GB. Put the same floor in the card body.
+  **Every box-watching cron that exits silently on ssh failure hides an outage.** If all watchers "say nothing, try next tick", a box that went dark overnight is only noticed by the morning status board. Keep one watcher that counts consecutive ssh failures and emits once (through the quiet-hours hold) after ~30 min unreachable, and first thing on a status request ping the box before reading any chain log.
   After the box returns, do these in one batch:
   - Read `uptime -s`, `pgrep` the expected jobs, and look at the training dir's `resume.pt` mtime and the last log line.
   - Restart training from `resume.pt`. A trainer that saves only model, opt, sched and SWA state resumes fine, but the data order changes, so record that.
@@ -225,7 +239,24 @@ in chat. Update any sibling card that was gated on the deferred step in the same
   To find this class of failure, read `hermes cron list` for `Last run ... error: Script timed out` on each active job, not only the job's output files.
   After the fix, run the script once by hand under an outer cap (`perl -e 'alarm 200; exec @ARGV' python3 script.py`, since macOS has no `timeout`). That run delivers any alert the hang swallowed and updates the state file, so report the delivered line in the reply.
 - **A completion-watch cron for a remote job must fire only on an explicit terminal status.** Exit unless the status line contains `KernelWorkerStatus.COMPLETE` or `KernelWorkerStatus.ERROR`. An "exit if RUNNING/QUEUED" test treats a not-yet-pushed `-b` slug (404) as finished and unblocks the card too early. When a retry moves to a `-b` slug, repoint the watcher and reset its one-shot flag in the same step.
+- **Park external waits with `schedule`, not repeated `block`** (2nd block → triage → auto-decompose). See references/parking-external-waits.md.
+- **Before writing a spec or a resume/restart instruction, read the code it depends on.** See references/spec-writing-checks.md.
 - **When `request-review --reviewer <self>` arrives, let the spawned reviewer run own the verdict.**
+  **This applies doubly to any irreversible step in the review (a the remote platform submit).** The wake reaches the
+  chat session while the board also spawns a reviewer run of the same profile, and both act. Once,
+  both reviewed a pre-approved submit card and each submitted the same kernel version 12 s apart,
+  burning the day's last slot. Submit only through a locked wrapper: it takes an exclusive `flock`,
+  checks a local ledger (slug@version and the phase prefix) and a fresh submissions listing, writes
+  the ledger line, and only then calls `submit`. Here that wrapper is `scripts/rsna_submit_once.py`;
+  put its exact command line in every submit card and approval comment, and never hand-type a
+  `competitions submit` from the chat while a reviewer run is live on that card.
+  Wrapper rollout, live-chain edits, transform specs, cron cleanup: references/live-chains-specs-and-crons.md.
+  The same split applies to verdicts: while a reviewer run is live on a card, the chat session
+  reads the diff and reports what it sees, but issues no approve/request-changes/block itself.
+  A `blocked` notification on a card your own reviewer run just handled is usually a deliberate
+  park (dependency wait on a long box chain, with a release cron that re-assigns the coder when
+  the chain exits). Read the card's last comment and the chain process before acting; do not
+  unblock or re-review it.
   Do not reclaim or close the card from the chat. Once that run holds the claim, closing
   it from the chat needs `reclaim` + `complete --force`. That reclaim triggers the board's anomaly
   monitor, which @-tags the user with a "lock expired, reclaimed" alert. It also leaves two
@@ -281,7 +312,7 @@ in chat. Update any sibling card that was gated on the deferred step in the same
   6. Tell the user how many hours the outage cost and which ETAs moved.
 - **A card blocked from `review` (e.g. the reviewer run blocked to get the user's push approval) returns to `review` on `unblock`, not to the implementer's queue.** Reassigning it to the coder first does not change that: the next run is spawned in review mode (`--skills sdlc-review`) under the coder profile. Such a run may still act on your approval comment (it executed the push here). So after unblocking, read the external side before touching the run: `kernels list --mine --sort-by dateRun` / `datasets list --mine` / the submissions list. **Never kill a worker you think is in the wrong mode until you have checked whether it already performed the irreversible step**; a kill after the push only triggers a `protocol_violation` respawn. Instead, comment "step X is already done at <time>, do not repeat it; continue from step Y". `reopen-review` is refused unless the card is in `review` at that moment.
   If the approval arrives while the card sits in `review` (not blocked), let the reviewer run route it back with `request-changes` headed `[stage handoff, not counted as a rejection, 0/3]`. Put the approved scope (PUSH_OK, push count, slug fallback, wait and verify steps, submit 0) into that reason. The next run is then a normal implementation run, and this worked cleanly. Do not `block` and `unblock` for the approval.
-  If the reviewer run already blocked the card for the approval and exited, `request-changes` is refused ("not in an active review run"). This sequence worked, run with no worker alive in between (check `ps` first): post the PUSH_OK scope as a comment (write it to a file and pass `"$(cat file)"`, because backticks inside a double-quoted comment are executed by the shell and silently drop text) → `assign <id> coder-bot` → `unblock <id>` (lands in `review`) → `reopen-review <id>` (lands in `ready`, coder). Then confirm with `show` and the next `spawned` event that a normal implementation run started.
+  If the reviewer run already blocked the card for the approval and exited, `request-changes` is refused ("not in an active review run"). This sequence worked, run with no worker alive in between (check `ps` first): post the PUSH_OK scope as a comment (via a file, see the backtick rule below) → `assign <id> coder-bot` → `unblock <id>` (lands in `review`) → `reopen-review <id>` (lands in `ready`, coder). Then confirm with `show` and the next `spawned` event that a normal implementation run started.
   To avoid this whole path, split any card whose later step needs the user's approval (a remote push or a submit) into two cards. The first card builds, does the local checks and ends with request-review; you approve it. Create the second card (`--parent <build card>`) only after the user approves the push. It does the push, waits for the run and verifies the output. Its run is then a normal implementation run, so the approval never travels through a blocked review card.
 - **Answering a "lock expired / reclaimed" anomaly alert:** read the evidence log it names
   (`~/.hermes/kanban/incidents/<board>_<task>_<event>.log`). `"manual": true` with a `prev_pid`
@@ -290,6 +321,8 @@ in chat. Update any sibling card that was gated on the deferred step in the same
   stray entry), the card status, and that the pid is gone. Tell the user what triggered it.
 
 ### Getting a long spec into a card
+
+Any multi-line comment/reason: write a file, pass `"$(cat f)"`; backticks inline in a double-quoted arg run as commands and silently drop text.
 
 A multi-paragraph card body inlined as `--body "$(cat <<'EOF' ... EOF)"` can be refused by the
 shell guard, which cannot prove the executable body of a large heredoc and blocks the whole
@@ -444,6 +477,7 @@ Keep "worker submits 0" in the body so the coder never submits.
 - **"If something gets submitted overnight, check what is next and go"** → make the follow-up mechanical before any score exists:
   - Write a decision-table file in scratch: events E1..En keyed on each pending submission's score band, each with exactly one action. An action is either a single-variable card (push 1 → submit 1) or "record only". Add a submit priority for when the UTC-day cap binds, and the rule "anything not in the table → report in the morning, no new experiment".
   - Prefix every overnight submit message with a phase tag (`p59 `, `p56s `, ...).
+  - A time-gated one-shot submit cron ("submit after the UTC reset") on a 30-min cadence can fire up to 30 min late. When the user asks for status after the gate time and the flag is still unset, run the same script by hand under an outer `perl alarm` cap, confirm one submission with the phase prefix, then `hermes cron pause` the job and add the new ref to the score watcher.
   - Add a no-agent cron (every 10 min) that reads the submissions csv. When a ref with a known prefix first shows a score or an error, it creates one reviewer-bot card whose body is that score plus the table. A state file keeps that to one card per ref.
   - The card applies the table, checks the board for an existing card with the same purpose, and @-tags nobody in quiet hours.
   - Do not let a score that changes two variables at once trigger an action. Example: a relabelled member's standalone score must not justify a blend-weight change; record it only.
@@ -749,7 +783,7 @@ block can trip the circuit breaker. Instead:
   Left for later, the final check flags it as a defect.
 - **Do not @-tag inside the user's quiet hours** (see memory), even when a decision is pending.
   Check the clock before writing the tag; say "for the morning" instead and let the cron flush.
-  When the user lifts quiet hours for one night only ("OK to alert until 1 am tonight"), keep the window itself as it is. `is_quiet()` already honours an `OVERRIDE_UNTIL` file (epoch; ignored once past or unreadable) in the quiet-hold dir, so write the epoch of the stated end time there and confirm with `python3 -c "import quiet_hours as q; print(q.is_quiet())"` from the scripts dir. Note that held alert files from old jobs will flush on the next tick.
+  When the user lifts quiet hours for one night only ("OK to alert until 1 am tonight"), keep the window itself as it is. `is_quiet()` already honours an `OVERRIDE_UNTIL` file (epoch; ignored once past or unreadable) in the quiet-hold dir, so write the epoch of the stated end time there and confirm with `python3 -c "import quiet_hours as q; print(q.is_quiet())"` from the scripts dir. Note that held alert files from old jobs will flush on the next tick. The override is global — it un-silences every cron that routes through `emit()`. When the request is about ONE project's alerts ("심사 기간엔 밤에도 알려줘"), first read that relay's wrapper: a contest relay may already bypass quiet hours inside its own judging window (`in_window(now)` → print directly). Then check the window bounds and leave `OVERRIDE_UNTIL` alone, so unrelated projects' alerts stay quiet.
   To actually use such a window, add a one-night no-agent watcher cron (every 15 min, `--repeat` bounded) that keeps a small state JSON and emits once per event: long-job milestones (e.g. every 2 epochs with the monitor metric labelled as monitor-only), job finished (with the raw final log lines + tag), download done, and a stall alert after 2 unchanged ticks. Route it through `emit()` so anything after the override expires is held for the morning, and tell the user which expected events will likely land after the cutoff.
 
 After you have issued a terminal review action, your obligations to that card are discharged even
