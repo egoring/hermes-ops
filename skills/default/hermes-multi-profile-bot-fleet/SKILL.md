@@ -377,6 +377,31 @@ move the original text into the body as a comment, so the activation criteria ar
 After installing into Hermes, confirm it registered with `skills_list` rather than trusting the
 file copy — a frontmatter the loader rejects leaves the files on disk but the skill absent.
 
+## Sharing skills across profiles
+
+A skill installed in the default profile is invisible to bot profiles. Don't copy it per
+profile (copies drift, and the curator edits each separately) and don't point bots at the whole
+`~/.hermes/skills` (unrelated skills such as jailbreak/creative/device ones enter every bot's
+prompt, ~1k extra tokens of skill index per turn). Share a curated subset:
+
+1. List default-only skills (from the dashboard reader or a per-profile `SKILL.md` name diff) and
+   propose a subset by function (dev/github, data/ML, docs, kanban ops) for the user to confirm.
+2. `mkdir ~/.hermes/shared-skills` and symlink each chosen skill dir, keeping its category path:
+   `ln -s ~/.hermes/skills/<cat>/<name> ~/.hermes/shared-skills/<cat>/<name>`. Add a README
+   (purpose, add/remove commands, precedence).
+3. Back up each bot `config.yaml`, confirm it has no `skills:` key, then append
+   `skills:\n  external_dirs:\n    - ~/.hermes/shared-skills`. The loader follows symlinked dirs.
+4. Verify per bot: `COLUMNS=250 hermes -p <bot> skills list | grep -c external` (without
+   `COLUMNS` the table truncates long names and a name diff reports false misses). Skills with
+   `environments: [kanban]` in frontmatter only appear inside kanban runs — check them with
+   `HERMES_KANBAN_TASK=t_test` set before calling them missing. Then one-shot a bot to
+   `skill_view` a shared skill and confirm the tool result `success: true`.
+
+Tell the user: the bot's own skill of the same name wins; links mean a bot's auto-edit of a
+shared skill rewrites the default original; open threads keep their old skill list (new
+threads see it); any dashboard "installed" column built from profile folders needs a shared
+marker (see `references/dashboard-service.md` → Skills page).
+
 ## Making skill usage visible in answers
 
 When the user wants to know which skills actually fire, add the requirement to the instruction
@@ -385,6 +410,11 @@ hooks — every runtime honors it and there is no plumbing to maintain. Require 
 at the top of the answer naming the loaded skills, and state explicitly that **nothing is printed
 when no skill was used**; without that clause every reply grows a "none" line and the signal is
 lost in noise.
+
+Recommending skills per question ("질문마다 스킬 추천") is the opposite direction and does need
+plumbing: a `pre_llm_call` shell hook picks candidates, the model decides whether to show a
+`💡 추천 스킬:` line (only when relevant and not already loaded). Recipe, consent registration
+for headless gateways, and precision rules in `references/shell-hooks.md`.
 
 ## Protected instruction files and approval timeouts
 
@@ -588,8 +618,9 @@ gateway does not lend a bot's token to another profile's cron. A default-profile
 `--deliver discord:<ch>` fails preflight (`blocked_config … has no gateway credentials`) when
 only the bot profiles hold `DISCORD_BOT_TOKEN`. Create Discord-delivered jobs in a bot profile
 (`hermes -p <bot> cron create …`; the job then runs on that bot's `model.default`, or pin with
-`--model`), copy any skill it uses into `profiles/<bot>/skills/` (a catalog install lands only in
-the chat's profile), remove the failed default copy, then test with `hermes -p <bot> cron run
+`--model`), make any skill it uses reachable from that profile (a catalog install lands only in
+the chat's profile — link it into the shared skills dir, see Sharing skills across profiles),
+remove the failed default copy, then test with `hermes -p <bot> cron run
 <id>` and prove delivery from `profiles/<bot>/cron/deliveries.db` (`status=delivered`, empty
 `error`) — not from the run's "succeeded" line. Don't copy a bot token into the default `.env`
 to fix it: two connections on one token knock each other off.
@@ -636,6 +667,10 @@ summarizing.
   kanban hygiene (notify-subscription cleanup), pushing the repo + own skills to GitHub without
   leaking IDs, going public (withholding live-project content, squash, per-folder commit
   labels), and filing upstream bug reports.
+- `references/shell-hooks.md` — per-turn context injection with `pre_llm_call` shell hooks
+  (payload fields, consent allowlist on unattended gateways, live reload, platform/attachment
+  filtering, fail-open, keyword-scoring precision), the skill-recommendation hook as the worked
+  example, and how to verify it reached a real Discord turn.
 - `scripts/verify_fleet.sh` — one-shot check that prompt edits are live on every profile.
 
 ## Operator vs bot work split

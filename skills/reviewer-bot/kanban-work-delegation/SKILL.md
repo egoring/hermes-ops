@@ -21,7 +21,7 @@ design, card authoring, and verification only. Reading files, running read-only 
 and recomputing numbers are all in scope; `cp`, edits, reverts, and writes to the
 workspace are not.
 
-Running the worker's benchmark or analysis script yourself is verification, not authorship — do it. Routing, card-input pre-registration and relay checks: `references/card-inputs-and-routing.md`.
+Running the worker's benchmark or analysis script yourself is verification, not authorship — do it. Routing: `references/card-inputs-and-routing.md`; protected/triage: `references/protected-files-and-triage.md`; waits/duplicates/queue re-ordering (SCHEDULED_UNTIL format, block→auto-decomposition, design-card duplicates, **link the new parent before unlinking the old** — the reverse order flips the child to `ready` and lets the dispatcher start it): `references/scheduling-and-duplicate-cards.md`.
 
 The line is **not** simply "mutating the workspace". Recomputing a stated result is yours;
 **mechanical exploratory search is the worker's even when it is entirely read-only.** Probing
@@ -210,15 +210,8 @@ CLI shape traps (they fail loudly but waste a round-trip each):
   parent is still in `review`, `unlink <parent> <child>` first — `complete` refuses on
   unsatisfied parent dependencies.
 - **A self-assigned design-record card is created `--initial-status blocked`, then
-  `complete`d at once.** Created `ready` and assigned to yourself, the dispatcher spawns
-  a reviewer worker on it within seconds. Create the implementation card afterwards with
-  `--parent <design id>`; the parent is already done, so the child is ready immediately.
-  If the design card was created `ready` anyway and a worker already claimed it, `complete`
-  is refused and a child created with `--parent` sits in `todo`. Do not `--force` or
-  `reclaim`. Run `unlink <design> <child>` so the child turns `ready`, and comment on the
-  design card that the spec is final in its body and the run should only `kanban_complete`.
-  Under time pressure, skip the separate design card and put the spec straight into the
-  implementation card body.
+  `complete`d at once** — created `ready`, a reviewer worker claims it and may spawn a
+  duplicate implementation card. Recovery: `references/pausing-and-sequencing.md`.
 - **When a user decision adds prerequisite cards in front of a blocked card**, create them
   and `link <new> <blocked>` **before** `unblock`. The unblocked card then waits in `todo`
   until they finish. Unblocking first lets the dispatcher claim it within seconds and run

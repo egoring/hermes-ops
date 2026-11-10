@@ -31,9 +31,37 @@ df -h ~ | tail -1
 
 되돌리기: 백업 파일을 `config.yaml`로 복사 → 5번.
 
-## R3. Hermes 업데이트 후
+## R3. Hermes 업데이트 (전·후)
+
+### 업데이트 전
+
+| 순서 | 확인 |
+|---|---|
+| 1 | `hermes update --check`, `hermes update --plan` (재시작 대상 서비스와 방식 확인) |
+| 2 | 전체 백업 `hermes backup -o <파일>`. 코드(`hermes-agent/`)와 `installs/`는 빠진다 → 데이터 전용 백업이다 |
+| 3 | kanban·state DB는 따로 복사: `sqlite3 <db> ".backup <대상>"` 후 복사본에 `PRAGMA integrity_check` → `ok` |
+| 4 | 로컬 수정 확인: 설치 트리에서 `git status`. 업스트림에 같은 수정이 있는지 보고 `--keep-stash` 사용 |
+| 5 | 실행 중 워커 0 확인. (a) DB의 running 카드 (b) `kanban_worker_client`·`agent.managed_worker` 프로세스 (c) 에이전트 모드 cron(`no_agent: false`)의 다음 실행 시각. 셋 다 봐야 한다. 비상 정지는 `hermes pause` / `hermes resume`(v0.23.0) |
+
+실행: 터미널에서 `hermes update --yes --backup --keep-stash`를 권장한다. Discord `/update`는 백업 여부가 `updates.pre_update_backup` 설정을 따른다.
+
+### 업데이트 후
 
 `hermes update` / `gateway start` / `gateway install` 은 plist를 다시 만든다.
+
+먼저 살아 있는지 확인한다.
+
+| 확인 | 기대 |
+|---|---|
+| `hermes --version` | 새 버전 |
+| `ls -l ~/.hermes/gateway.sock` | 소켓이 있다 |
+| `lsof -t ~/.hermes/gateway.sock` | `~/.hermes/state/gateway.lifecycle.json`의 pid와 같다. 이 환경에서 `pgrep -f "gateway run …"`은 0줄이었으므로 pid는 소켓으로 찾는다 |
+| `launchctl list \| grep ai.hermes` | 서비스가 올라와 있다 |
+| 대시보드 | 응답한다 |
+
+소켓이 없으면 워커 0을 확인한 뒤 `hermes gateway restart`를 1회만 한다.
+
+그다음 기존 절차:
 
 | 순서 | 확인 |
 |---|---|
@@ -43,6 +71,21 @@ df -h ~ | tail -1
 | 4 | 모델 ID가 새 카탈로그에 있는지 (`R2` 1번 명령) |
 | 5 | 행동 테스트 T3·T5·T6 |
 | 6 | kanban 도구·CLI 옵션 변화: `hermes kanban create --help` 를 이전과 비교 |
+
+### webapp (v0.23.0)
+
+기본값은 `webapp.enabled: false`다. 쓰려면 `hermes config set webapp.enabled true` 후 `hermes gateway restart`. 그다음 `hermes webapp`이 일회용(60초) 로그인 링크를 연다. 주소를 직접 열면 로그인 안내만 보이는 것이 정상이다.
+
+### 되돌리기
+
+릴리스 업데이트는 태그 커밋으로 detached HEAD 이동을 하고 `main` 브랜치는 그대로 둔다.
+
+1. 서비스 정지: `hermes gateway stop`(= launchd bootout). 대시보드는 `launchctl bootout`
+2. `git switch main`
+3. `hermes pm install` → `hermes pm doctor`
+4. 서비스 시작
+
+DB 복원은 해당 파일을 연 프로세스가 0일 때만 한다(`lsof <파일>`로 먼저 확인).
 
 ## R4. 규칙(SOUL·AGENTS) 수정
 

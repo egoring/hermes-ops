@@ -12,7 +12,7 @@ metadata:
 For running work as an analysis/design profile that delegates implementation to a
 coder profile via `hermes kanban`.
 
-Stuck cards/refused transitions: `references/stuck-cards.md`. Approved handoffs that stall between turns: `references/stall-watchdog.md`. wake vs notify cost: `references/notify-token-budget.md`. fable: `references/fable-handoff.md`.
+Stuck cards/refused transitions: `references/stuck-cards.md`. Approved handoffs that stall between turns: `references/stall-watchdog.md`. wake vs notify cost: `references/notify-token-budget.md`. fable: `references/fable-handoff.md`. Numeric gates vs spec constants/measurement resolution, both-direction checks of event results: `references/acceptance-gates.md`. Workers cannot mutate Kanban via the CLI (measurement scripts you run, temp boards, cards blocked on a user step): `references/worker-limits-and-test-boards.md`.
 
 ## Role boundary
 
@@ -30,11 +30,31 @@ Worker summaries are claims, not facts. Before relaying a result:
 
 - **Recompute headline numbers from the raw artifact** (pkl/json the worker left
   behind), not from its prose. Sign flips and dropped rows show up here.
+- **Check a correspondence claim in both directions.** "Every refresh had a triggering event"
+  does not prove "every event produced a refresh"; count the inputs that got no output too
+  (per tab/per item, and where its log simply stops). A one-way check passed while one tab had
+  silently died after a single error and missed most later events.
+- **Before saying "🔴 none" on a pre-review, test the card's own completion criteria literally.**
+  If a criterion says "commands copy-paste runnable", dry-trace each command against the live
+  system; if it says "no regressions", look for failure paths (an error, a retry, a read failure)
+  rather than only the happy-path numbers. Your "🔴 none" comment steers the review run, so a
+  premature one costs a retraction and a round.
 - **`diff` the files** against a known-good baseline to confirm the change is
   exactly what was claimed and nothing else rode along.
 - **Confirm claimed deletions with `ls`.** A worker once reported "deleted X" when
   it had actually overwritten X with the original content — the file was still there.
 - Check that a claimed "no-op default" really reproduces the baseline numbers exactly.
+- **Check an event→reaction pipeline in both directions, per consumer.** "Every reaction has a
+  preceding trigger" (no spurious actions) says nothing about "every relevant trigger got a
+  reaction". Take each consumer's log, find where it ends, and count the triggers that arrived after
+  that point. A consumer that dies silently (error boundary unmounting the listener, a sig committed
+  before a failed compute) looks perfect on the first check while it drops later events, and its
+  status flag can still read "live".
+- **Discord pre-checks report what you verified; they do not dictate the verdict.** Comment the
+  numbers you recomputed and which FAILs are spec/measurement artifacts. Do not write "approve" or
+  "do not send back" to the review worker. Its independent pass is the second look that catches
+  defects you missed, and a pre-emptive "no 🔴" told to the user has to be retracted when it does.
+  Tell the user "pending the review verdict" until the review run lands.
 - **Read helper-bot text edits back before relaying them.** A Haiku helper transcribing Korean prose substituted look-alike words that reversed meaning ("contaminates" became "raises") and garbled others. For verbatim doc additions, `tail` the file and grep the load-bearing phrases; fix via a coder card with exact old→new string pairs.
 
 Relay your own recomputed figures, and say explicitly when a worker's framing was
@@ -61,7 +81,9 @@ in chat. Update any sibling card that was gated on the deferred step in the same
   body must end with the request-review loop and `--reviewer reviewer-bot` spelled out. Finish with
   `kanban show <coder_id>` and confirm it reads `ready`, `assignee: coder-bot`, `parents: <design_id>`.
 - **Pre-verify the premise before assigning.** Confirm the data/files the card depends
-  on actually exist and have the shape you assume. Cards built on a guess waste a run.
+  on actually exist and have the shape you assume, and that a worker is allowed to run every
+  step (no kanban CLI writes, no `hermes update`; see `references/worker-limits-and-test-boards.md`).
+  Cards built on a guess waste a run.
   For a component borrowed from someone else's code, the premise includes which branch
   actually runs with the mounted assets (manifest fields, Dataset version), not what
   its variable names suggest (recipe: the deadline-reader notes in the
@@ -143,18 +165,7 @@ in chat. Update any sibling card that was gated on the deferred step in the same
   4. A card that waits on another card's artifact (e.g. a kernel that needs a checkpoint still training) instead gets `link <producer> <card>`, and it becomes ready when the producer completes.
   5. When you return such a hand-off, label it "dependency wait, not counted" so the round counter stays honest.
   6. A stage handoff that starts the long job (request-changes "[stage handoff] start fold0") must be followed by your own `schedule` as soon as the worker's "started" comment lands. "Do not block" in the reason does not stop the worker from blocking at its terminal call, and that block plus the earlier ones sends the card to triage, where the auto-decomposer splits it.
-- **When a gate result is hours away and the next stage is pre-registered, pre-arm the next stage behind the gate instead of waiting for the review cycle.** This user wants the box never idle ("if nothing is running, train ahead; stop it if it fails"). Put a `nohup nice -n 19` chain launcher in a card that polls every 5 min and starts the next training only when all of these hold:
-  - the predecessor's launcher process count is 0
-  - its report file exists
-  - every input-fix marker (e.g. `cache_merge.done` plus the expected file count) is present
-  - no GPU process is running
-  It then parses the report's verdict line: `PASS` → run seeds in sequence; `FAIL` → write a `STOPPED_<reason>` file and exit; a missing or odd line → `STOPPED_REPORT_PARSE` and exit.
-  When the user wants the box busy even before the verdict ("start it now, discard it if the result is bad"), train ahead: start the next fold and the gate script (CPU) at the same moment, check the verdict at every poll, and on `FAIL` TERM the speculative run, discard it, and start a pre-registered fallback arm with its own fold-0 gate (e.g. a 50/50 mix of the two label sources), stopping the queue only if that also fails. Fix the fallback's definition and gate in the pre-registration commit before fold 0 finishes, and have the chain append to the same launcher log with the same markers so the existing wake cron keeps working (update the cron's marker regex and process count for the new launcher in the same pass). A timeout on any input wait also stops it. Add a reviewer kill switch: a `STOP_<stage>` file that is checked before the start and at every epoch boundary, so a defect found while verifying the gate stops the run without killing processes by hand. Require the worker to test the parser on fake reports (PASS / FAIL / garbled) and to build the new mode as a separate trainer file, so the running job's source stays untouched. Kill switch and parse fallback are what make it safe to start before you have reviewed the gate.
-  The launcher must be running **before** the gate fires, so the card's pre-launch checks have to fit in the time left. Do not require a full-path CPU smoke of a large model: a 384-px CoAtNet ran at 272 s/it on CPU (about 2 h for 25 batches), and the GPU sat idle for 1.5 h after the gate. Two options:
-  - Cap the CPU smoke at a few batches, with a time limit derived from a measured CPU step time.
-  - Make a short GPU smoke the launcher's own first step after the wait conditions, and abort with `STOPPED_SMOKE` if it fails.
-  If the predecessor finishes before the launcher is up, switch the smoke to GPU in a comment right away (the GPU is free by then). Do not let the box wait for the original smoke plan.
-- **While a push card waits for weights that are still training, rehearse everything except the weights now ("stage 0").** Build the kernel with a stand-in checkpoint of the same architecture and save format (e.g. the fold-0 model of the same trainer). Put it in every slot and use its real sha. Then check that no placeholder is left, that the cell md5s match the previous kernel except the intended cells, and that the full-path smoke passes on CPU (fork Pool → inference → reader csv shape → base restored), with `nice 19` and `CUDA_VISIBLE_DEVICES=""` so the training GPU is untouched. Have the worker leave the morning commands as one block: sha → Dataset → files check → rebuild → GPU smoke → pre-registration commit → push. A CPU run takes the CPU fallback path, so it cannot prove the fp16/CUDA path. Keep "GPU smoke with the real checkpoints passes, else no push" as a hard gate. Afterwards `schedule` the card again.
+- **When a gate result is hours away and the next stage is pre-registered, pre-arm the next stage behind the gate** (chain launcher, kill switch, parse fallback, smoke timing), **and while weights are still training rehearse everything except the weights ("stage 0").** Recipes: `references/long-job-chains.md`.
 - **When new evidence breaks the premise of a pre-armed chain (auto-release cron → push → conditional submit), disarm it the same hour.** Example: a sibling kernel of the same design times out. Do these in one pass:
   1. Post a `HOLD — push 0, submit 0` comment on the card. It must say that the user's conditional submit instruction is suspended for this card, and why.
   2. Edit the release cron so it only alerts and no longer `assign`s or `unblock`s the card. Keep the backup.
@@ -240,7 +251,8 @@ in chat. Update any sibling card that was gated on the deferred step in the same
   After the fix, run the script once by hand under an outer cap (`perl -e 'alarm 200; exec @ARGV' python3 script.py`, since macOS has no `timeout`). That run delivers any alert the hang swallowed and updates the state file, so report the delivered line in the reply.
 - **A completion-watch cron for a remote job must fire only on an explicit terminal status.** Exit unless the status line contains `KernelWorkerStatus.COMPLETE` or `KernelWorkerStatus.ERROR`. An "exit if RUNNING/QUEUED" test treats a not-yet-pushed `-b` slug (404) as finished and unblocks the card too early. When a retry moves to a `-b` slug, repoint the watcher and reset its one-shot flag in the same step.
 - **Park external waits with `schedule`, not repeated `block`** (2nd block → triage → auto-decompose). See references/parking-external-waits.md.
-- **Before writing a spec or a resume/restart instruction, read the code it depends on.** See references/spec-writing-checks.md.
+- **Before writing a spec or a resume/restart instruction, read the code it depends on.** See references/spec-writing-checks.md (also: how to write latency/count/load-time/CPU gates so a correct implementation can pass).
+- **When a faithful implementation misses gates, sort each FAIL before the review worker acts:** recompute from raw; label it measurement artifact, spec arithmetic, noise, or real. Comment on the card "do not request-changes; approve execution, criterion N unmet = design decision", and give the user the real misses with accept-as-override vs follow-up-design options. Sending it back makes the coder change constants it does not own.
 - **When `request-review --reviewer <self>` arrives, let the spawned reviewer run own the verdict.**
   **This applies doubly to any irreversible step in the review (a the remote platform submit).** The wake reaches the
   chat session while the board also spawns a reviewer run of the same profile, and both act. Once,
