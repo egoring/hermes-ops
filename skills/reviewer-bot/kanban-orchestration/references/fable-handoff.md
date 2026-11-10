@@ -29,7 +29,23 @@ ask for its judgment. Fable is an independent checker, not a devil's advocate an
 - For 2-3 load-bearing claims: state what the data would show if the claim were false, then look.
 - Ends with a decision report; fable does not decide.
 
+## "Finish everything, then 최종점검"
+When the user asks for a final check of work that is still in flight, create the fable card now
+with `--parent <last card of each chain>` (it stays `todo` and starts when they complete), subscribe
+the thread with `wake`, and post the 🔀 line with its id immediately. The body lists every card in
+scope with artifact paths, the spec cards holding the numeric criteria, any `사용자 결정(override)`
+(record it as unmet, not as a rollback argument), items reviewer missed earlier as priority checks,
+and what is out of scope (deferred cards). Steps that need kanban CLI writes go in the report as
+"needs re-measurement by the Discord reviewer", since the fable worker hits the same guard.
+
 ## Afterwards
+- A final check covers only the commits that existed when it ran. Fixes made for its 🟡 findings
+  (and anything landed after) are review-only until a new final check. When reporting "all done",
+  split the list into "final-checked" and "reviewed only", and say whose eyes saw each item
+  (review worker, your own measurement, nobody, as for a no-review helper doc card). Offer the next
+  final check, and fix any known 🟡 first so one check covers it. The user must say "최종점검".
+- Put an unverified deploy↔commit gap in the body as a priority check, e.g. an image tag built from
+  the previous HEAD (`<sha>-dirty`).
 - Fable's verdicts are evidence, not the conclusion (10/21 its 'high confidence' crash cause had a
   counter-example). Where reviewer and fable disagree, reviewer re-judges that item from raw data
   once; no back-and-forth rounds.

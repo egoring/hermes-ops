@@ -71,6 +71,13 @@ The release cron later runs `assign <id> coder-bot` + `unblock <id> --reason ...
 When the box needs a small, time-boxed change (a guard value, a conf swap) before a run boundary and the main card's worker is on another stage, open a separate coder card with the deadline in the title, the exact file/line change, "do not touch running processes", and a pointer to the files the other card owns. Do not push it into the busy card's queue: a comment wakes nobody and the worker may not see it before the boundary.
 
 ## Card landed in `triage` and the auto-decomposer spawned child cards
+**Variant: root in `todo`, children as its parents** (event `block_loop_detected` then `decomposed`, comment "Root will wake when all children complete"). This one is simpler:
+1. `schedule <root> "SCHEDULED_UNTIL=..."` **first** — it works from `todo`. If you unlink first, the root turns `ready`, a worker spawns, and it blocks again.
+2. `archive` the `todo` children (no worker). A `done` child stays as it is. For a child with a live worker, only comment "duplicate of <root>; change no more code, just complete". Do not transition it from Discord.
+3. `unlink <child> <root>` for every child. `show <root>` must list only the real parents.
+4. Diff the files the children touched (mtime after the decompose time, or the child summaries). Children often find the work done and make only small edits, but check.
+The cause is usually a spec that made the worker block twice for a hand-off. Fix the spec so it parks with `schedule`.
+
 Repeated block/park cycles route a card to `triage`. Within a minute the auto-decomposer may split it into child cards that redo finished stages, link them as parents of the root, and start workers on them. `triage` refuses `schedule`, `block`, `unblock` and `promote`. Recovery:
 1. List the children: `show <root>` (the "Decomposed into ..." comment) and `ps ... grep "[w]ork kanban task <child>"`. Kill the child workers.
 2. `unlink <child> <root>` for each child, and also child → child links, then `reclaim` the running ones and `archive` all children.

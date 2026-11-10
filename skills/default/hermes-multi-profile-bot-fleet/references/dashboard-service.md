@@ -163,6 +163,12 @@ Rules for any separate app that reads Hermes state:
   - Deploy with `imagePullPolicy: Never` + git-short-hash tags; Makefile renders `kubectl
     kustomize` and seds the tag in. Put `token`/`test`/`build`/`deploy`/`agent-install`/
     `pf-install`/`status`/`down` targets in it so the user can stop everything with one command.
+    The `-dirty` suffix must come from `git status --porcelain` (includes untracked files), not
+    `git diff --quiet`: with the latter a build containing a NEW uncommitted file gets the same
+    tag as the running image, the rollout is a no-op, and the new route 404s. Commit before
+    `make build` anyway, and after deploy hit the new endpoint rather than trusting "web 접속
+    가능". Changing host-agent code needs `launchctl kickstart -k gui/$(id -u)/<agent label>`
+    (separate from the gateway; bots unaffected).
   - launchd: `bootout` immediately followed by `bootstrap` can fail while the old job unloads —
     rerun the install once and confirm with `/health`. Check `/health` a few seconds after
     bootstrap; an immediate probe races uvicorn startup and looks like a failure (read the log).
@@ -267,6 +273,13 @@ Rules for any separate app that reads Hermes state:
     `.hub/lock.json` `installed` → hub; else local (hand- or auto-written).
   - Merge by name across profiles; hash each copy and flag "differs per profile" when hashes
     differ — auto-edits drift per bot, so bots may follow different rules.
+  - Shared skills: also read each profile's `skills.external_dirs` (expand `~`, relative =
+    profile home, existing dirs only), walk them with `os.walk(followlinks=True)` (entries are
+    symlinks), and emit `shared_with: {profile: dir}` only where the profile has no own copy of
+    that name. Render it as a distinct colored `<profile>↗` with the dir in `title` plus a
+    `공유 N` badge; otherwise a shared skill looks default-only. Expose the same union in any
+    machine index other tools consume (e.g. a `/api/skills-index` web route for a recommendation
+    hook — the api is reachable only from web, so the route lives in web).
   - Usage: `skill_view` calls in every profile's `state.db` (`json_each(messages.tool_calls)`,
     `function.name='skill_view'`, arguments `name`, strip a `plugin:` prefix), last 30 days.
     Aggregate by NAME across all profiles — a bot often calls a skill installed only in another

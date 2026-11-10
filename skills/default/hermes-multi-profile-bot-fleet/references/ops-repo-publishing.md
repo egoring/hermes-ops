@@ -179,3 +179,29 @@ the push goes out with the hit. Keep personal deny-words and the redaction list 
 account names into the tracked script as a deny-list publishes them. Warn in the README never to
 copy the repo's SOUL back into a profile (placeholders break the mention). Test the checker by
 dropping a file with a known deny-word and confirming exit 1.
+
+Sync-script rules:
+- Validate every source path BEFORE deleting the snapshot dir. A script that `rmtree`s first and
+  exits on the first missing source leaves the snapshot half-deleted and never reaches the PII
+  check. A source that vanished is usually a skill the curator moved to `.archive/` — drop it
+  from the list (and the README table) rather than pointing at the archive.
+- Don't probe a repo script with `--help` to learn its flags: scripts that only test for one
+  flag (`if "--check" not in argv: copy()`) treat any other argument as a full run. Read its
+  argv handling first.
+- Snapshot ops scripts (cron watchers, hooks, their notify module) the same way as skills, into
+  e.g. `scripts/hermes/`, passing them through the same ID redaction — notify modules hard-code
+  user/channel IDs.
+- When the gate flags a fake example ID or a deny-listed project word inside a live skill or a
+  new doc line, reword the source (e.g. "19 repeated `1` digits", a generic noun) instead of
+  allow-listing it.
+
+## Updating the docs after an ops change
+
+When asked "anything to update on GitHub?", check every repo touched in the session (`git status
+--porcelain`, `git rev-list --left-right --count @{u}...HEAD`, no-remote repos noted as local
+only), and grep the ops repo for the new feature names to see what is undocumented. Map each
+change to its doc: structure/config → `01` (new numbered subsection + file map), procedures and
+cron/hook checks → `03` runbook (R-section), new baselines → `04`, the choice and its rejected
+alternatives → `05` D-row, local `변경이력`. Present that table, then sync → gate (exit 0) →
+docs → gate again → commit + push. Check `gh repo view --json visibility` before writing and say
+in the report when the repo is PUBLIC, since every new doc line ships.
