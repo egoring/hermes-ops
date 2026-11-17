@@ -30,3 +30,23 @@ Use when a card must be inserted, reordered, held, or re-scoped while other card
 - Check the artifacts, not the sentinel line in the log. A build wrapper can echo DONE after `make` failed. Grep the build log for `error` / `collect2` / `undefined reference`, and list the output `bin/` directory for the binary the next step needs.
 - If you find a defect while the worker is waiting on a download, comment it on the card right away, so the fix happens inside the wait and not after it.
 - If the host stops answering ssh and ping, report that to the user as a status problem: the scheduled card's download or job has probably stopped too.
+
+## Changing direction mid-run
+
+- When changing direction mid-run, put the correction in a card comment that says it
+  overrides the body. It may not reach a running worker, but it is authoritative on requeue.
+  When new evidence makes a sub-task redundant (e.g. the numbers it would produce turn out to
+  be published already), cut it in that comment, lower the card's resource caps (pushes, GPU)
+  in the same comment, and check the external side right away (e.g. `kernels status` on the
+  slug the sub-task would have pushed) so you can tell the user whether anything was already spent.
+
+## Retiring a card, rewriting a resumed card
+
+- **Retire a card the moment its purpose is answered by something else**, e.g. a full-scale
+  reproduction of a submission that has since scored on the hidden test. Comment why, `archive`
+  it, and remove its release crons in the same pass. Otherwise it spends quota at the next reset.
+- **When a pre-armed card is resumed after hours with a changed plan, rewrite its body** with
+  `kanban edit <id> --title ... --body "$(cat <file>)"`. Put the revision on top with "this
+  revision overrides the original below", and keep the original text under it for context. Then
+  `assign <id> coder-bot` + `unblock`, and confirm a worker spawned. A comment alone may be read
+  after the stale body has already steered the run.

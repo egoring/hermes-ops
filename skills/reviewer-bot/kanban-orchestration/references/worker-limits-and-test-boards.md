@@ -61,3 +61,32 @@ and 2 of them ran before they were caught. Rules:
   secret; it verifies only non-secret evidence (hash prefix, field empty, length).
 - Subscribe the thread with `wake` only when the card ends in a user decision; intermediate cards
   get `notify`.
+
+## Security-scan block on a non-essential step
+
+**A worker blocked by the security scan on a non-essential step (e.g. a bulk `rm -rf` cleanup)
+should not hold the essential steps hostage.** If the blocked step is not needed for what follows
+(enough free space already exists), comment "step deferred to the user; do not retry or bypass;
+continue with steps X–Y and document the exact command", unblock, and give the user that command
+in chat. Update any sibling card that was gated on the deferred step in the same pass.
+
+## Capability blocks and protected files
+
+- **A worker's capability block** (e.g. a missing local tool, or an install the sandbox
+  refuses) is answered on the same card. Post a comment that overrides the body and reroutes
+  the blocked step, for example to a kernel the card already plans to run. Keep the push and
+  GPU caps unchanged. Then run `kanban unblock <id>` and confirm that `show` reads `ready`.
+  Do not create a replacement card. Do not tell the worker to bypass a security scan.
+  A legitimate fix to what the scan flagged is allowed. Example: a raw-IP upload is blocked, so you add an ssh config
+  alias. When a blocked step needs approval that only the user can give, and the user has already
+  approved it in chat, you may run that one step yourself. Examples are a file transfer or a
+  token copy. Verify it by hash, then say on the card exactly what you did. Do not edit files in
+  the repo.
+- **Protected files (AGENTS.md and similar) need interactive write approval.** A headless worker
+  times out waiting for it, and so would a helper card. Do not put such an edit in a card at all.
+  Give the user the exact old line and the exact new lines in chat, and he edits the file
+  himself. He prefers this to clicking through an approval. Then `git diff` the file to confirm
+  only the intended hunk changed, and let the next card commit it untouched. If a review card was
+  blocked only on that edit and its reviewer run has exited, close it yourself: a verdict comment,
+  then `unblock` (it returns to `review`), then `complete --result`. Plain `complete` works
+  because no run holds the claim.

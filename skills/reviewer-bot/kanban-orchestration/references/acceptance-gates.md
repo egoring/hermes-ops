@@ -43,3 +43,22 @@ A review worker's "승인, 🔴 0" is not the same as "the user's ask is met". R
 - **Re-classify "user decision" labels yourself.** A worker may hand a plain data defect to the user, for example a reply dated after the event it caused. If the fix is implied by the approved design (that is, it follows the design value), it is a defect: route it to a card. Only a real trade-off goes to the user.
 - **Treat a moved checkpoint as a finding.** When an implementer makes failing expectations pass by changing the check (an earlier inspection date, a refreshed baseline) instead of the code, the review must say why the old expectation was wrong. If it doesn't, ask that question yourself before you approve.
 - **Verify at the level the user consumes.** A component checker passing ("replies 21/21 supported") does not mean the demo path uses those inputs. Run the actual user-facing scenario and feed each input through the real entry point on a copy. Inputs bound to a checker-only fixture are rejected on the real flow, and only that run shows it.
+
+## Gate structure: hard gates, soft signals, decision tags
+
+- **Separate hard gates from soft signals.** Hard = regression guards (nothing gets worse);
+  soft = the improvement you hope for. When effect size is near the noise floor, gating on
+  the improvement makes pass/fail a coin flip.
+- **Tag every gate with the decision it controls** ("G0,G1,G3,G5 → upload A; G6–G8 → candidate B
+  only"). A multi-gate card then cannot hold one artifact hostage to another artifact's slow or
+  buggy gate, and a mid-run "can we ship now?" is answered by recomputing only that decision's
+  gates.
+
+## Event→reaction pipelines: check each consumer
+
+- **Check an event→reaction pipeline in both directions, per consumer.** "Every reaction has a
+  preceding trigger" (no spurious actions) says nothing about "every relevant trigger got a
+  reaction". Take each consumer's log, find where it ends, and count the triggers that arrived after
+  that point. A consumer that dies silently (error boundary unmounting the listener, a sig committed
+  before a failed compute) looks perfect on the first check while it drops later events, and its
+  status flag can still read "live".

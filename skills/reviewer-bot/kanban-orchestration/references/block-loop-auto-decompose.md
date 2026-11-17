@@ -32,3 +32,35 @@ When a card is blocked twice (recurrences reaches the limit of 2), Hermes logs `
 - **Quota-limited generation loops: park with `schedule` from the first stop.** A worker that blocks for each daily-quota stop or for each lost loop sends the card to triage at the second block. In the spec, have the loop end on STOP_QUOTA and the worker hand back via a comment. The reviewer then runs `schedule <id> "리필 대기 ..."` and resumes with `unblock --reason` after the user confirms the refill. A long generation loop started from a worker's terminal dies when that terminal call times out (420 s). Launch it detached with `nohup ... &`, confirm the pid with `ps`, and let the worker only watch it.
 - `promote` works only for `todo` or `blocked` cards. `unblock` fails on `todo` or `triage` cards. After the decomposition is removed, a `triage` card can be blocked or unblocked again.
 - A card linked as a parent of a card that is designed to stay `blocked` holds the child in `dependency_wait` forever. Use `unlink` when the link was only for reference.
+
+## Circuit breaker and auto-decomposer cleanup
+
+- **Repeated blocks trip a circuit breaker** (`failure_limit`, default 2) and route the
+  card to `triage`. Raise `--max-retries` on cards you expect to iterate on.
+  From `triage` an auto-decomposer can split the card into new child cards and make them
+  its parents. The children are claimed and spawned at once. They redo steps the card
+  already finished, such as a Dataset re-upload or a kernel push, so they can spend
+  quota or FROZEN push slots. Handle it right away, before any other action on the card. Children are claimed within
+ seconds, and archiving or unblocking the original card does not stop children that
+ are already running:
+ 1. Run `kanban show <card>` and read `parents:`. Then `kanban show` each child and look
+     for `created by auto-decomposer`.
+  2. Make sure the external side effects did not happen, by checking
+     `datasets list --mine` and `kernels list --mine`.
+  3. `kanban block` the running children with a reason that says they duplicate the parent.
+  4. Kill their worker pids (`ps aux | grep "work kanban task <child>"`), then
+     `kanban archive` all of the children.
+  5. Run `kanban unlink <child> <card>` for each child. The original card then re-enters
+     `todo` → `running` with its comments intact, and your last comment steers it.
+  `unblock` and `promote` are refused on a card in `todo` or `running`, so you do not need
+  them here. Expect one completion or block notice per child afterwards. Answer each in
+  one line: it was a duplicate that you archived.
+- **Leaving a card in `triage` is not a safe park: the auto-decomposer can still split it minutes later.** It created three child cards (one `ready` and one `todo` that would redo a remote push and a PC training run) and re-parented the card to them. Do not park in triage. Clean up as above (block/kill/unlink/archive the children; `block` is refused on `todo` children, archive works), then `kanban schedule <id> "<what it waits for>"` once the card is back in `ready`, and confirm `show` reads `scheduled` and any worker spawned during the gap has exited.
+
+## Cards in `triage` refuse block/schedule/promote
+
+  A card in `triage` refuses `block`, `schedule` and `promote` from the CLI. `assign <id> coder-bot`
+  first takes it out of triage, and after that `block` is accepted, so a parked wait can be set up
+  the normal way (block + a release cron that runs `assign` then `unblock`). Without the assign the
+  dispatcher does not run it, so it is effectively parked, and a release cron must not try to move
+  it: make the cron alert-only and resume the work by hand on the card or on a revised card.

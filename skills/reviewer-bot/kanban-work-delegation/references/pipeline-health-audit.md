@@ -1,5 +1,15 @@
 # Auditing the multi-bot pipeline from kanban data
 
+## Contents
+
+- 1. Inventory (read-only)
+- 2. Queries that expose the structure
+- 3. Crashed-but-alive forensics (do before quoting lost hours)
+- 4. Mapping symptoms to fixes (ranked by usual impact)
+- 4b. Token / cost audit ("save tokens without losing quality")
+- 5. Get an independent opinion before ranking
+- 6. Reporting
+
 Use when the user asks "how can the agent structure / bot setup be improved" or
 why work is slow or flaky. Answer from the board databases, not from impressions.
 The recommendation is only as good as the numbers behind it, and the first causal

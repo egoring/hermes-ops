@@ -70,3 +70,12 @@ time + condition, update detection via `.git/HEAD`).
 - Before proposing a new config lever or local patch, check the installed docs/defaults
   (`hermes_cli/config_defaults.py`, `llms-full.txt`) and upstream log: the feature or fix
   often already exists, switched off or in a newer build.
+
+## 7. Subscribing the right chat and reading subscriptions
+
+- **Subscribe the chat the user is in now, not the one an earlier card used.** Each new
+  Discord thread has its own id. If you copy the chat/thread id from a previous card's
+  subscription, the wake goes to an old thread the user has left. Take the id from the
+  current session's source. When unsure, subscribe both, and pass `--chat-type thread`.
+  `kanban show --json` does not list subscriptions. Read them with
+  `sqlite3 -readonly ~/.hermes/kanban/boards/<board>/kanban.db "select * from kanban_notify_subs where task_id='<id>'"`.

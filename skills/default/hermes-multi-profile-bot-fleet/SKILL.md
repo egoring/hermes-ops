@@ -90,7 +90,8 @@ drop). Order:
    model unchanged; kanban task counts and cron list unchanged; your own helper scripts still run;
    the targeted problem re-measured (e.g. 60 s CPU-time delta).
 5. Count errors since the restart by timestamp, not by grepping `Traceback`: traceback lines carry
-   no timestamp, so a naive filter pulls in weeks-old ones. Attribute each to the nearest
+   no timestamp, so a naive filter pulls in weeks-old ones — `awk '$1" "$2>="<ts>"'` keeps every
+   non-timestamp line too (letters sort after digits), inflating counts into the hundreds. Attribute each to the nearest
    preceding timestamped line before calling it new.
 6. Update the ops issues table, memory, and any upstream issue (comment with before/after numbers,
    then close).
@@ -116,8 +117,11 @@ Usually the curator, not the user's last action. Prove the cause before blaming 
 4. `restore` fails with `destination already exists` when a CATEGORY folder has the skill's
    name (`skills/github/` holding `github-*`); `mv .archive/<name>` to its original category
    path by hand (e.g. `software-development/<name>`) and confirm with `skills list`.
-5. `hermes curator pin` refuses bundled/hub skills — they are exempt from auto-archive anyway,
-   so report that instead of retrying. Pin only agent-created skills you want kept.
+5. `hermes curator pin` refuses bundled/hub skills, yet the 30-day auto-archive still moves them
+   (the CLI's "never touched" wording is wrong). For skills the user wants kept:
+   `hermes curator restore <n> && hermes curator lock <n>` — locked skills are skipped by the
+   automatic transitions (side effect: agents can no longer `skill_manage` them). Re-check
+   `.archive/` a few days later. Pin only agent-created skills.
 Shared-skill links (`~/.hermes/shared-skills`) point at default originals; if the curator archives
 an original, the bots silently lose it — re-check `skills list | grep -c external` after an
 archive batch.
@@ -458,33 +462,55 @@ when no skill was used**; without that clause every reply grows a "none" line an
 lost in noise.
 
 Recommending skills per question ("질문마다 스킬 추천") is the opposite direction and does need
-plumbing: a `pre_llm_call` shell hook picks candidates, the model decides whether to show a
-`💡 추천 스킬:` line (only when relevant and not already loaded). Recipe, consent registration
-for headless gateways, and precision rules in `references/shell-hooks.md`.
+plumbing: a `pre_llm_call` shell hook picks candidates and its injected text tells the model to
+load a fitting one before answering (`💡 추천 스킬:` only for related-but-unneeded ones). Recipe,
+consent registration for headless gateways, human-turn scoping (kanban notices, first turn vs
+mid-thread), precision rules and the eval/replay script in `references/shell-hooks.md`.
 
-Judge such a hook on real Discord traffic, not hand-picked questions: replay the logged turns
-against `state.db` text (`~/.hermes/hooks/skill_recommend_eval.py`). A week of real traffic showed
-40% of candidate turns were kanban notifications arriving as user messages (`[nick] [kanban] Task…`),
-and long mid-thread work instructions matched common Korean words in auto-generated summaries
-(songwriting for "ai", design-md for "설계"), so the model ignored every candidate (0 💡 in 84
-human turns). Fix that held: skip `[kanban]`/`[IMPORTANT`/`kanban_task_id` turns, recommend broadly
-only when `extra.is_first_turn`, and mid-thread only for ≤150-char messages whose specific word hits
-a skill NAME; require a name/English-description hit before Korean-summary-only matches count.
-The injected context is ephemeral (not stored in `messages`), so measure effect as "candidate
-skill was `skill_view`ed in that turn", not by searching stored text.
+Judge such a hook on real Discord traffic, not hand-picked questions — replaying a week of logged
+turns is what exposed its noise. The injected context is ephemeral (not stored in `messages`),
+so measure effect as "candidate skill was `skill_view`ed in that turn", not by searching stored
+text.
 
-Generic methodology skills (testing-strategy, analyze, architecture, code-review) are the ones bots
-skip: the model decides it "already knows" despite the system prompt's MUST-load wording, while
-project/procedure skills load fine. What fixed it (11-16, verified interactively on reviewer/coder):
-a SOUL section with a task-type → skill table and only two allowed skip conditions (not in list;
-already loaded and still in context), plus hook text saying "load first" instead of "display 💡".
-Also check the role bot actually has the skill — design skills lived only in default until shared.
+"Bots skip installed skills" — diagnose in this order before changing anything:
+1. Measure per human turn: was a relevant skill loaded in that turn OR earlier in the session.
+   Most "skipped" turns are follow-ups with no relevant skill, and a skill loaded once stays in
+   context, so a raw per-turn load rate (often ~6%) badly understates use.
+2. Does that bot actually have the skill (`COLUMNS=250 hermes -p <bot> skills list`)? Design/
+   methodology skills often live only in default — share them.
+3. Is its category demoted to `[names only]`? That happens only under
+   `agent.coding_context: focus`; under the default `auto` it is not the cause.
+4. Model judgment: generic methodology skills (testing-strategy, analyze, architecture,
+   code-review) get skipped as "already known" despite the MUST-load prompt, while project/
+   procedure skills load fine. Fix with a SOUL section `## 스킬 먼저 로드`: a task-type → skill
+   table, only two allowed skips (not in your list; already loaded and still in context), "don't
+   just show 💡 — load it", and "this does not change role rules". Pair it with hook text saying
+   "load first". An always-present index beats relying on the model's description-based choice.
+Verify interactively (pty path below) with the previously missed question types plus a
+near-miss negative (an off-topic question must load nothing, 0 tool calls). For a number that
+holds up, run a trigger eval: ~20 prompts (half should-load incl. paraphrases that never name the
+domain, half near-misses sharing its words), each 3×, target ≥80% loaded / ≤20% false loads —
+three single runs are anecdote. Harness that works (`~/.hermes/hooks/skill_trigger_eval.py`):
+`script -q /dev/null timeout 100 hermes -p <bot> chat -t skills -q "<q>"` per run, parse
+`📚 Skill <name>` from the ANSI-stripped output, thread pool of ≤5 (bots share the provider login
+with live Discord traffic). `-t skills` only: no file/terminal side effects, and the load decision
+happens in the first seconds, so don't wait for the full answer. Run it as a background job with
+notify (~40 min for 2 bots × 20 × 3). These local runs land in the bot's `state.db` as
+`source='local'` sessions — every usage metric (monitor scripts, dashboards) must filter
+`sessions.source='discord'` or the eval inflates it.
 
-Curator auto-archive also hits bundled skills after 30 idle days, and `curator pin` refuses them
-("bundled or hub-installed"). Use `hermes curator restore <n>` then `hermes curator lock <n>` —
-locked skills are skipped by `apply_automatic_transitions`. Re-check `.archive/` a few days later
-rather than trusting the CLI's "never touched" wording.
-wants this hook ON for every profile; it measurably turns a skipped skill into a loaded one
+Discord is the claim the user cares about; CLI tests only prove the mechanism. Report the two
+separately: "applied" (files, hook log `platform=discord`, `prompt-size --platform discord`) vs
+"observed in a real Discord turn" (a `skill_view` in a `source='discord'` session that started
+after the change, or the new SOUL phrase in that thread's stored prompt via the system_prompts
+hash join below). Open threads only pick up SOUL edits if a compaction rebuilt their prompt
+(`Compaction rebuilt a drifted system prompt` in the profile's `agent.log`) — check the stored
+prompt rather than assuming either way. Bot-authored messages are ignored by default
+(`allow_bots`), so a real Discord test needs the user to post in a NEW thread: hand them 2–3
+paste-ready messages (two should-load, one off-topic) and what you will check afterwards. New SOUL rules reach new
+threads; long open threads keep their stored prompt until compaction.
+
+The user wants this hook ON for every profile; it measurably turns a skipped skill into a loaded one
 (same interactive question: no `skill_view` without it, `code-review` + `github-code-review`
 loaded with it). When bots under-load skills, check the hook is registered before anything else.
 After adding or importing skills, run the hook's `--explain` with a few domain questions for
@@ -494,6 +520,47 @@ from every profile `config.yaml` (backup first), `hermes -p <p> hooks revoke "<c
 ~30 s, confirm the hook log stops. Threads whose history already holds injected blocks or the
 model's reactions to them keep imitating them — find them with a `state.db` query on a
 distinctive phrase of the block and recommend `/new` for those threads only.
+
+## Bot skills at the size limit
+
+`skill_manage` refuses any skill file over 100,000 chars — SKILL.md AND each `references/` file
+(same check on `write_file`). A bot that hits it trims the file to just under the cap, so every
+later patch fails again — visible only as `Tool skill_manage returned error … limit: 100,000`
+WARNINGs in that profile's `errors.log`. Hermes' linter already warns at ~24k (`skill_view` loads
+the whole body and it stays in context all session). Sweep all bots and include reference files,
+not just the skill that errored — several sit at the cap together. `find -size` and
+`prompt-size`'s `skill_md_bytes` count bytes (Korean ≈3 bytes/char), so use them only as a
+prefilter and decide on `wc -m`:
+`find ~/.hermes/profiles/*/skills \( -name SKILL.md -o -path '*/references/*.md' \) -not -path '*/.archive/*' -size +80k -exec wc -m {} + | sort -rn`
+A reference file already near the cap is split sideways: keep its name for the first part (old
+pointers keep working), move whole `## ` sections to sibling topic files, add a note at its top
+naming them, and list each sibling in SKILL.md's References with its own "read when".
+
+Split (bot-owned skills need the user's OK):
+1. Back up each dir: `COPYFILE_DISABLE=1 tar -C <category dir> -czf
+   ~/.hermes/backups/<ts>_skill_split/<name>.tgz <name>` — without the env var macOS adds `._*`
+   AppleDouble members that break any later diff or check.
+2. Target shape: SKILL.md ≤24k with always-on rules first (role boundaries, approval/submission
+   gates, current-state facts — after compaction only the start may survive), a short step
+   overview, then `## References` listing every file with a "read when …" condition. Detail moves
+   verbatim into topical `references/` (extend an existing topic file before creating one), one
+   level deep, `## Contents` atop reference files over 100 lines, frontmatter byte-identical.
+3. Gate: `python3 scripts/skill_split_check.py <profile> <name> <backup dir>` must print PASS —
+   every non-empty original line (old SKILL.md + old references) still present, size, frontmatter,
+   every reference linked. Run it on the untouched skill first to prove it reports 0 missing.
+4. Each skill needs a full read, so give one skill per subagent in parallel with the rules
+   above, the checker command, and "the bot is live: re-check SKILL.md mtime before the final
+   write and merge". Re-run the checker yourself on every result — children self-report.
+5. Verify loading through Hermes itself, not just the files: with
+   `HERMES_HOME=~/.hermes/profiles/<bot>` and the Hermes venv, call
+   `tools.skills_tool.skill_view(name)` and `skill_view(name, file_path='references/<x>.md')` and
+   check `success` + content length for every split skill.
+6. Cause is bots appending incident narration to skills, so prevent the repeat with a SOUL
+   section `## 스킬에 기록할 때` in every bot: lessons only (rule + one-clause why; no dates, card/
+   PR numbers, narration); check `wc -m` before a patch and, past 20,000 chars, add nothing to the
+   SKILL.md body — append to the matching `references/<topic>.md` via `skill_manage` with
+   `file_path` (new topic file if none fits) and add one router line only if it is not listed;
+   on the 100k error, move content to references instead of trimming to fit.
 
 ## "Do the bots use plugins?"
 
@@ -772,6 +839,8 @@ summarizing.
   filtering, fail-open, keyword-scoring precision), the skill-recommendation hook as the worked
   example, and how to verify it reached a real Discord turn.
 - `scripts/verify_fleet.sh` — one-shot check that prompt edits are live on every profile.
+- `scripts/skill_split_check.py` — zero-loss/size/link gate for splitting an oversized skill
+  (see Bot skills at the size limit).
 
 ## Operator vs bot work split
 
@@ -816,6 +885,11 @@ the machine). Re-rank the remaining items when data from an earlier item disprov
 and say so. Mark each todo completed the moment it is verified — a stale checklist shown in the
 UI makes the user ask "isn't this already done?". Answer "추천하는 방법은?" with one pick per open
 decision plus the reason and the exact next action, not a re-listing of the options.
+
+When the user asks to check outside docs/articles for something you built, return a table: source
+(link) → key finding → what it means for our setup, then a short list of concrete changes. On
+"근거가 있고 우리거에 넣으면 좋으면 진행", apply every evidence-backed item (backup first) and defer only the
+ones whose value depends on a measurement you haven't run yet, saying which measurement decides them.
 
 Korean, direct, peer tone. Lead with the finding, then the evidence table. When the user asks
 "measure again", re-measure fresh (new deltas, same method) and compare against the previous

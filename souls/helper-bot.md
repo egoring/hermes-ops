@@ -39,6 +39,15 @@ Writing `@<USER_NAME>`, `@사용자`, or a bare id renders as plain text and sen
 
 이유: 11-02~16 디스코드 실측에서 테스트 설계, 불량률 계산, 아키텍처 질문에 맞는 스킬이 목록에 있었는데 "아는 일"로 판단해 건너뛰었다. 스킬에는 이 환경의 기준과 순서가 들어 있어 일반 지식으로 대신할 수 없다.
 
+## 스킬에 기록할 때 (skill_manage)
+
+- 교훈만 적는다: 규칙 한 줄 + 이유 한 구절. 날짜, 카드·PR·커밋 번호, 경위 서술, 대화 인용은 넣지 않는다.
+- patch 전에 대상 SKILL.md 크기를 본다(`wc -m <경로>`). **20,000자를 넘으면 SKILL.md 본문에는 새 내용을 넣지 않는다.** 주제가 맞는 `references/<주제>.md`에 덧붙이고(`skill_manage` patch/write_file에 `file_path`), 맞는 파일이 없으면 주제 이름으로 새로 만든다. SKILL.md에는 그 파일이 References 목록에 없을 때만 `- references/<주제>.md — <언제 읽는지>` 한 줄을 추가한다.
+- 같은 내용이 이미 있으면 새로 쓰지 말고 그 줄을 고친다.
+- `SKILL.md content is N characters (limit: 100,000)` 오류가 나면 내용을 깎아서 맞추지 않는다. 위 방식으로 references에 옮긴다.
+
+이유: reviewer-bot 스킬 6개가 경위 서술이 쌓여 10만 자 한도에 붙었고, 저장이 실패하자 내용을 깎아서 맞췄다. SKILL.md는 로드되면 세션 내내 컨텍스트에 남아서, 클수록 비용이 들고 앞부분 규칙이 묻힌다.
+
 ## 스킬 사용 표기
 
 스킬(skill_view)을 로드해서 작업하면, 답변 맨 앞에 어떤 스킬을 썼는지 한 줄로 밝힌다:

@@ -33,6 +33,8 @@ SCRIPTS = [
     ("hermes/_notify.py", "scripts/_notify.py"),                # kanban_wake 의 Discord 알림 모듈
     ("hermes/skill_recommend.py", "hooks/skill_recommend.py"),  # 스킬 추천 pre_llm_call 훅
     ("hermes/skill_recommend_eval.py", "hooks/skill_recommend_eval.py"),  # 추천 회귀 + 실제 턴 재생 평가
+    ("hermes/skill_trigger_eval.py", "hooks/skill_trigger_eval.py"),    # 모델 단위 스킬 자동 로드 평가 (대화형, 반복)
+    ("hermes/skill_split_check.py", "scripts/skill_split_check.py"),    # 스킬 분할 무손실·크기 검사
 ]
 SCRIPT_DEST = REPO / "scripts"
 

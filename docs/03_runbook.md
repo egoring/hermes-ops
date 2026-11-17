@@ -196,6 +196,22 @@ python3 ~/.hermes/hooks/skill_recommend.py --explain "질문" --profile <프로�
 - `Skill security warning … outside the trusted skills directory` (공유 스킬 로드 시 errors.log WARNING): 링크가 default `~/.hermes/skills/`로 풀려서 나는 경고다. 로드는 정상.
 - 1회성 실행(`hermes chat -q -Q`)은 스킬 프롬프트가 "아는 일엔 로드하지 말라"로 바뀐다. 자동 로드 테스트는 대화형 모드로 한다.
 
+- 모델이 실제로 스킬을 불러오는지 재기: `python3 ~/.hermes/hooks/skill_trigger_eval.py --profiles reviewer-bot,coder-bot --runs 3 --workers 5` (120회 ≈ 40분, 봇 인증을 같이 쓰니 동시 실행 5 이하). 결과 `~/.hermes/logs/skill_trigger_eval/`.
+- 디스코드에서 확인: 채널에 **새 메시지**(기존 스레드 말고)로 봇을 멘션해 보낸다 → 세션 `messages.tool_calls`에 `skill_view`, 답변 첫 줄 `🧩`. 기존 스레드는 압축 때까지 옛 SOUL로 동작한다.
+
+### 스킬이 10만 자 한도에 붙었을 때 (분할)
+
+봇의 `skill_manage` patch가 `content is N characters (limit: 100,000)`로 실패하고, 봇이 내용을 깎아 맞추기 시작한다. 1주 점검(`fix_watch`)이 9만 자 넘는 파일을 알린다.
+
+```bash
+B=~/.hermes/backups/$(date +%Y%m%d)_skill_split; mkdir -p $B
+COPYFILE_DISABLE=1 tar -C <스킬 상위 폴더> -czf $B/<스킬>.tgz <스킬>      # ._ 파일 없이 백업
+# SKILL.md: 항상 지킬 규칙 맨 앞 + 단계 개요 + References(파일마다 "언제 읽는지"). 세부는 references/로 원문 그대로 이동
+python3 ~/.hermes/scripts/skill_split_check.py <스킬> --profile <프로필> --backup $B   # PASS까지 반복
+```
+
+검사 조건: 원본의 모든 내용 줄 보존(제목 수준·글머리표만 변경 허용), frontmatter 동일, SKILL.md ≤24k, 모든 참조 파일이 SKILL.md에 연결. 참조 파일도 한도가 같으니 큰 파일은 `## ` 단위로 옆 파일로 나눈다(원래 이름을 첫 조각으로 유지해 기존 링크가 살게). 봇이 작업 중일 수 있으니 쓰기 직전 mtime을 다시 확인한다.
+
 ### 큐레이터가 기본 내장 스킬을 보관할 때
 
 30일 안 쓴 스킬은 기본 내장이라도 `.archive/`로 옮겨진다(11-07 55개, 11-14 7개). `curator pin`은 내장 스킬을 거부하므로 **restore 후 lock**:
