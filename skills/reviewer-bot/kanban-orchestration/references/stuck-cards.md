@@ -1,5 +1,30 @@
 # Stuck or un-reviewable kanban cards
 
+
+## Contents
+
+- Card sits `ready` for hours, no worker claims it
+- New card sits in `todo` because its `--parent` is blocked
+- `request-changes` refused: "task is not in an active review run"
+- Reviewing a card from the Discord session while its review run is also alive
+- A live worker gets a twin ("crashed" / "pid N not alive" while it still runs)
+- Parking a card while a remote job is QUEUED/RUNNING
+- `scheduled` cards do not release themselves
+- Parking an INTERIM card while a long box chain runs
+- Urgent fix while the main card is busy
+- Card landed in `triage` and the auto-decomposer spawned child cards
+- Worker blocked with `needs_input` on a contradiction in your own spec
+- A spec comment posted after the worker already handed off
+- Worker blocks because it "cannot read the spec"
+- Worker re-asks a decision you already posted
+- Comment bodies lose backtick-quoted names
+- One release cron per box chain
+- Auditing crons ("쓸모없는 cron 정리해줘")
+- A live worker on a `gave_up`/`blocked` card finishes anyway
+- Passing a stage gate: do not use `request-changes` as a GO
+- "crashed" notices: duplicate workers, exhausted retries, false crashes
+- Credential stop (`exit_code 78`)
+
 ## Card sits `ready` for hours, no worker claims it
 1. `hermes kanban --board <b> diagnostics` — look for `stranded_in_ready`.
 2. `hermes kanban --board <b> show <id>` event log — look for `respawn_guarded {'reason': 'blocker_auth'}`.
@@ -151,3 +176,51 @@ spawns a fresh worker that re-reads the body and may redo pushes.
 
 ## Passing a stage gate: do not use `request-changes` as a GO
 `request-changes` is the rejection verb; using it to say "go on" corrupts the 3-round rejection count and fires a "changes requested (BLOCK)" alert. One card that is passed back and forth this way for many stages becomes a multi-day session (dozens of runs, dozens of unblocks). Make each card one verifiable stage: approve it, and put the next stage in a new child card. If a review run is open and you only need to add instructions, comment and `unblock --reason`. Only when there is no other way to return an open review run (for example a comment that landed after handoff, see above), start the reason with `[GO, not a rejection, round N/3]`, say so to the user in one line, and do not count it as a round.
+
+## "crashed" notices: duplicate workers, exhausted retries, false crashes
+
+- **A "crashed (worker exited); dispatcher will retry" notice is not proof the worker died.**
+  On every such notice, run `ps -axo pid,etime,command | grep "work kanban task"` right away.
+  If the card now has two workers (old pid from the `crashed` event, new pid from the next
+  `spawned` event), `kill -TERM` the older one. It can take about 20 s to exit, so re-check
+  with `ps -p`; if it is still alive (e.g. inside a long `sleep` in a terminal tool call),
+  `kill -KILL` it and its sleeping child. Kill its process tree, not just the pid: list
+  children with `pgrep -P <pid>` (the terminal tool's `bash -c` wrapper and e.g. a running
+  `<platform-cli> jobs output` download), because an orphaned child keeps writing into the same
+  directory the new worker is about to use. Then check every other machine the card drives
+  (`ssh <box> 'pgrep -af "platform-cli|train"'`): jobs the old worker started with
+  `setsid nohup` survive its death and are progress, not debris — leave them running. Then
+  comment on the card what you killed, what the dead worker already created externally
+  (check the remote side yourself, e.g. `datasets list --mine`, `kernels status`), every
+  detached job still running with its pid, log path and which items it covers ("s0→s1 being
+  downloaded; fetch only s2·s3"), and "do not re-create/re-push/re-download; continue from
+  step X". The usual cause is a single multi-minute `sleep` in the worker; write every wait
+  in cards as `sleep` ≤ 60 s + `kanban heartbeat`. This applies to every
+  profile's cards, including read-only final checks. A second notice for the same crash
+  can arrive late; check the event log before treating it as new.
+  Repeated false crashes exhaust `max-retries` and the card lands in `blocked` with a
+  "gave up (retries exhausted)" notice, even though the last worker may still be alive.
+  Your own `kill` of a duplicate worker is counted as one of those failures, so killing the
+  newer duplicate on a card already at 2/3 tips it into `gave_up` while the older worker
+  keeps working. If a live worker remains, do NOT `unblock` right away (that spawns another
+  duplicate). Comment "run N is alive and continues; nothing to redo", and register a
+  one-shot no-agent cron (every 5 min) that waits until that pid exits and then, only if the
+  card is still `blocked`, runs `assign <id> coder-bot` + `unblock` with a "continue from the
+  comments; re-run nothing; pgrep before each remote step" reason.
+  If the dead-looking worker had already pushed a remote job (status QUEUED/RUNNING), comment "already pushed (push n/n used), do not re-push; poll status with sleep ≤ 60 + heartbeat" before killing the older pid. A respawned run re-reading the body otherwise spends the slug's only push again.
+  If no worker is alive, handle it the same way as a crash (kill the live tree, inventory finished and detached work, comment
+  "continue from step X; re-run nothing"), then `kanban unblock <id>` and confirm with `ps`
+  that exactly one new worker spawned. Do not create a replacement card. For long multi-stage
+  cards (cache build → download → bench), set `--max-retries 3` or more at creation.
+  False crashes come in bursts: one dispatcher tick can mark every live card "crashed" at the same minute. On one notice, check all running cards' worker pairs in the same pass, not just the named one. When the dead-looking worker had started a detached job on a remote box (a `nohup xargs` integrity check, a download), tell the new worker by pid and log path to adopt it and not restart it, and to `ps`-check for duplicates before each step.
+  Running `kanban dispatch` from the chat to kick a `ready` card spawns a worker under a different lock than the gateway dispatcher's. The gateway then marks it "crashed" and spawns a second worker on the same card. Do not dispatch by hand. If the card was unlinked or promoted, the gateway dispatcher picks it up within a minute. If you did dispatch, handle the next "crashed" notice as a duplicate: kill the older pid and tell the survivor to rebuild over any partial artifacts and to check the external side (`kernels list --mine`) before pushing.
+
+## Credential stop (`exit_code 78`)
+
+- **A `crashed` event with `exit_kind: terminal_provider` / `exit_code 78` ("provider rejected this profile's credential") is a real stop, not a false crash.** The card goes straight to `blocked` (`gave_up` after one attempt), and every card of that profile that was running at that minute stops with it. It does not retry. When the user reports "the login dropped", do these steps:
+  1. Read the card's log with `kanban log <id>`; it shows the HTTP 401 / revoked-token line.
+  2. After the user re-authenticates, confirm the profile answers with `hermes -p <profile> chat -q "reply with just OK"` (`auth list` alone does not prove the token works).
+  3. Inventory what the detached jobs finished meanwhile: training logs, result files, download loops.
+  4. `unblock` each stopped card with a reason that states the cause, lists the finished results with their numbers, and says what must not be re-run.
+  5. `unlink` any consumer card whose producer's compute is done but whose card is still open (e.g. docs pending), so the consumer starts now.
+  6. Tell the user how many hours the outage cost and which ETAs moved.

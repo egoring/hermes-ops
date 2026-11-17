@@ -3,6 +3,17 @@
 Depth for reviewer cards that run long unattended chains on the training box, or that specify a data
 transform. Always-on submit rules stay in SKILL.md. This file only adds what to do around them.
 
+## Contents
+
+- Submit wrapper rollout
+- Writing a spec that touches a data transform
+- Changing a long PC chain while it runs
+- Restarting a chain after a crash or host reboot
+- Slow epochs after a config change
+- Cron hygiene
+- remote jobs with several versions
+- Creating and maintaining crons
+
 ## Submit wrapper rollout
 - When you introduce the locked submit wrapper, backfill its ledger with every earlier submit
   (slug@version and phase prefix).
@@ -94,3 +105,17 @@ Windows/WSL GPU (driver shared-memory fallback), independent of host uptime. Com
   pending item (e.g. a watch list with an unscored ref). Tell the user which ones you kept and why.
 - When the user changes a guard threshold, update the cron and every in-code assert that enforces
   the same limit. A running launcher's copy gets the restart rule above.
+
+## remote jobs with several versions
+
+- **A card that pushes several versions of one remote job slug must download each version's output before the next push.** `<platform-cli> jobs output <slug>` returns only the latest version, so write "push vN → COMPLETE → download → only then push vN+1" into the card. If a worker skipped it, do not settle for a log excerpt: the version-aware SDK output call recovers the older version's files (details in the project-competition-lifecycle skill, mixing-kernel recipe).
+
+## Creating and maintaining crons
+
+- **`hermes cron create` takes the schedule as the first positional argument**: `hermes cron create "every 15m" --name <n> --script <file in profile scripts/> --deliver discord:<thread_id> --no-agent [--repeat N]`. There is no `--schedule` flag. A one-shot watcher script keeps a flag file in the profile cache and exits silently once the flag exists, so the job can stay registered. Run the script once by hand right after creating it, and confirm it prints nothing and writes no flag while the condition is still false.
+- **Cron housekeeping ("turn off what is not needed, slow the rest").** List every job with `hermes cron list`, then for each active watcher check its target before touching it: the kernel or submission it watches (`kernels status`, the competition's submissions list) and its state file in the profile cache. Pause only watchers whose targets are all terminal; a watcher with even one PENDING target (often another competition's submission) gets a longer interval instead (`hermes cron edit <id> --schedule "every 60m"`). Report paused vs lengthened with the reason per job.
+  "Clean up the crons we don't use" means `hermes cron remove`, not pause: one-shot wakes whose card is closed, gates whose condition can no longer recur, and jobs already paused with a `Next run` weeks in the past. Map names to ids by reading the `hermes cron list` output to a file and grepping the id line above each `Name:` line, then list the survivors with one purpose each.
+- **Every no-agent watcher script needs a hard time cap on in-process network calls.** `subprocess.run(..., timeout=)` covers CLI calls. An in-process client (e.g. `an in-process SDK client call`) has no timeout of its own: one hung call held the job until the cron's 3600 s script limit, and the score alert it existed for never went out. Wrap such calls in `signal.signal(SIGALRM, raise)` + `signal.alarm(120)`, with `alarm(0)` in `finally`, and let the next tick retry.
+  To find this class of failure, read `hermes cron list` for `Last run ... error: Script timed out` on each active job, not only the job's output files.
+  After the fix, run the script once by hand under an outer cap (`perl -e 'alarm 200; exec @ARGV' python3 script.py`, since macOS has no `timeout`). That run delivers any alert the hang swallowed and updates the state file, so report the delivered line in the reply.
+- **A completion-watch cron for a remote job must fire only on an explicit terminal status.** Exit unless the status line contains `KernelWorkerStatus.COMPLETE` or `KernelWorkerStatus.ERROR`. An "exit if RUNNING/QUEUED" test treats a not-yet-pushed `-b` slug (404) as finished and unblocks the card too early. When a retry moves to a `-b` slug, repoint the watcher and reset its one-shot flag in the same step.

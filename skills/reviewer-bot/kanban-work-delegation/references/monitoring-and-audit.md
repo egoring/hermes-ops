@@ -30,3 +30,38 @@ Evidence comes from the profiles' own session stores, not from worker self-repor
 3. Review pairing: for each card, `show --json` events of kind `review_requested` → (implementer, reviewer) must be (coder-bot, reviewer-bot); count changes_requested rounds against the 3-round cap; count `<@…>` mentions in approval summaries when the user asked for untagged completions.
 4. Discord-session transitions: confirm each complete/unblock you made was on a card with no running worker (`runs` last line not running).
 5. Report: kept / violated (time, card, what, already corrected?) / your own deviations (e.g. running a read-only script in the live tree instead of a copy). Fix forward: put a missing rule into the per-card comment of the remaining cards, not only into a skill the worker may not load.
+
+## Live status, ETAs and machine load (step 5)
+
+**Before quoting an ETA, read the live process, not the output folder.** Take `ps` for the
+running command (flags such as `--fresh` mean the worker restarted from zero), and take the
+progress line of the log it writes (`[k/N]`). Then compute the rate from two timestamps.
+A records folder left by an earlier pass can be nearly full while a fresh rerun is at 7%.
+"Done in 10 minutes" read off that folder turned into a 5-hour run, and the estimate had
+to be withdrawn. If you can't tell why the worker restarted, say so; don't guess a reason.
+
+**"Is this overloading the machine?" — answer with four readings and the end time.** Give
+load average against the core count, `memory_pressure` free %, `docker stats` per
+container (CPU, memory against its cap), and `pmset -g therm` and power state. Add the
+time the job ends, since the load stops then. List stale containers you see (days old,
+0% CPU) as cleanup for a card, not something to delete yourself. Give the one knob the
+user can turn (concurrency) and what it costs in time.
+
+For your own "is it still running?" checks, keep one read-only status script in the
+profile's `scripts/`. It covers board `ls`, progress files, remote job status, and live
+worker pids per card. Run it with `bash <path>`. Long inline one-liners that chain many
+commands are rejected by the command parser, and a script is re-runnable anyway.
+Write verification probes the same way, as `review_<card>.py` in scratch, with a step argument (`tab`, `dup`, `sym`, ...). The terminal lifecycle guard refuses inline heredocs that name large data files, because it cannot scan them. The next review round of the same card then re-runs the same file unchanged.
+
+## Reading a report card's full result (step 6)
+
+**Read a report card's full result, not the truncated summary.** `hermes kanban show`
+cuts a long `kanban_complete` summary mid-sentence and drops its metadata. The quickest
+full copy is the board DB itself: open `~/.hermes/kanban/boards/<slug>/kanban.db`
+read-only (`?mode=ro`) and `select summary, metadata from task_runs where task_id=?` —
+`metadata` holds the per-criterion verdicts, the checker's own numbers, defects by
+severity and any rubric disagreements; `tasks.result` holds the one-line advisory. The
+worker's `~/.hermes/profiles/<worker>/state.db` (`messages`, last assistant row whose
+`tool_calls` holds `kanban_complete`) is the fallback when the run row is empty.
+Relay from that, and say which of your earlier claims it overturned.
+A fable opinion card's raw numbers also sit in its own scratch (`~/.hermes/profiles/fable-bot/cache/scratch/<topic>/probe*.log`). Read those logs before you relay, because the summary drops the per-arm tables (bands, ratio-shift grids) you need to judge its advice.

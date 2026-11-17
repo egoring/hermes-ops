@@ -36,3 +36,53 @@
 - Hot-reloaded prompt files (system.md) change production the moment they are written. Measurement cards must use a candidate file plus a diff. Apply it only at deploy time.
 - A test may pin system.md's sha. After applying a prompt diff, expect that test to need a follow-up update.
 - Ingest-time features (doc-date meta, aggregate files) only take effect when knowledge is re-ingested. Runtime features (L1 masking) take effect on restart. Say which is which in the deploy report.
+
+## 5b. Pause and resume on the user's word
+
+"Finish what is running, then stop so I can test" → let the running card (and its review
+loop) finish, and `schedule` every queued `todo` card downstream of it (see step 1). Then
+tell the user which code state the live service is actually on: cards approved but not
+yet deployed do not show up in his manual test, so offer the redeploy as a separate
+choice.
+On "do the next one", resume only the next card (`unblock <id>`). Keep any code card that
+follows a planned rebuild in `scheduled` until the rebuild is done, because the image
+build copies the working tree and would ship its half-edited files. When a resumed card
+runs the CLI, warn him his live chat replies may slow down while it measures.
+If the user asks for a deploy at a state change (a pending card is approved), ask "now or
+after your test?" before acting: the redeploy changes the bot he is testing.
+
+"Pause this until X is done" → `block <id> "<reason + what exists + resume instructions>"
+--kind needs_input`, then confirm with `ps` that the worker process exited. If the user
+later says "wait for my approval", that **replaces** the automatic condition. Comment the
+change on the card, drop any cross-board subscription you added for the old trigger, and
+do not unblock when X finishes. On resume, first post a comment listing the artifacts that
+already exist and must not be regenerated (frozen folds, uploaded datasets). Then unblock.
+
+**Taking over a card that another session stopped ("다른 세션에서 하던 거 해야 되면 진행해줘").** Before `assign` + `unblock`:
+- Confirm with `runs <id>` that no run is live.
+- Read every comment from both sessions. If a bounce and a later chat comment give different fix rules, name the one that governs and withdraw the other explicitly, using the scarce resource as the tiebreak (GPU quota).
+- List the uncommitted files left in the tree, and mark them as unverified half-state to be re-verified from scratch. Name the other cards' files that must stay out of the commit.
+- If a remote run the stopped worker launched is still live and the CLI cannot stop it, the card must not push again. Its output is reference only and stays out of the verdict. Ask the user to press Stop in the web UI, with the quota reason. When he reports it, check that the remote status reads cancelled, and comment "user stopped, no results" for the report.
+The next review continues the old round counter.
+
+**"Fix it, then final-check, then proceed" means the fix card stops before the side effect.**
+When a fix card also performs the irreversible step (push a GPU run, submit, publish), the
+user's "check first" request arrives after it already happened. Split it: fix + CPU proof
+in one card, the push/launch in a separate step gated on the check. When the user has
+already approved the run ("fix, check, then run"), create the launch card after the check
+returns go. Chain it with `--parent <last fix card>`, so your approval of that fix starts
+the launch with no extra round trip. Give the launch card its own pre-push re-checks and a
+one-push cap. For a read-only final check ("fix it all, then get the check"), create the
+check card now with `--parent <fix card>`: it waits in `todo` through any bounce and starts
+by itself on approval. Scope its body as `<base commit>..HEAD` plus "read the fix card's last
+approval and bounce history first", since the fix commits do not exist yet. If you already bundled
+them, say so plainly and give the user the stop path (e.g. Cancel in the platform web UI,
+since the CLI has no cancel) together with the rule you will apply if the run starts
+before the check returns.
+
+"Stop this" (for good) is not a pause.
+- `block` with the user's decision, the list of kept artifacts, and "do not resume".
+- `block` does not stop a live run. Kill the worker pid **and** any child process it
+  spawned, then confirm with `ps`.
+- Check the cards that depend on it. `hermes kanban unlink <parent> <child>` so they do not
+  wait forever, and comment what they must now mark "n/a".

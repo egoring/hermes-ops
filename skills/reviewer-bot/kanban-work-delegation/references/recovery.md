@@ -1,5 +1,16 @@
 # Recovering stuck, crashed, or mis-steered kanban cards
 
+## Contents
+
+- Headless workers cannot pass approvals
+- "Crashed" does not mean dead
+- Waiting on a shared remote slot is not a decision block
+- Resource-limit blocks are card-design defects
+- Dispatcher state-machine traps
+- Taking over a card another session of yours stopped
+- Moving delivery to a new chat thread
+- Recovery rules (moved from SKILL.md)
+
 Depth for the Recovery section of SKILL.md. Each item: the rule, then why.
 
 ## Headless workers cannot pass approvals
@@ -178,3 +189,82 @@ When the user moves the work to a new thread ("여기서 하게 변경해줘"), 
 - remove watchers whose job is done instead of moving them, and update the thread id in the
   project skill.
 Verify with `notify-list` (new id on every open card) and `cron list` (Deliver lines).
+
+## Recovery rules (moved from SKILL.md)
+
+- **"The quota ran out mid-work, is anything broken?" — audit four things, then the live service.**
+  (1) `runs <id>` for every active card. A `rate_limited (quota wall)` row means the run was requeued without counting a failure, so the review round counter did not move. (2) The current run's latest heartbeat time in `show --json` events. (3) `git status --short` and `git log` for half-written files or a missing handoff commit. (4) Card comments for a partial verdict from an aborted review. Then check any service that bills the same subscription (a bot on a CLI token) with one real call. Report each item as found or not found, and flag the shared-quota risk for the next critical window.
+- **A `crashed` run is not proof that the worker is dead.** Before you report a crash or
+  write retry instructions, run `ps -axo pid,ppid,etime,command | grep <task_id>` and
+  `kill -TERM` any stale run. Then read what each run already did (push, upload) from the
+  worker's `state.db` before you tell the user how many of anything exist.
+- **Card-event notifications can arrive after you already handled the event.** A
+  "blocked" wake for a run you resolved minutes ago looks like a new block. Run `runs <id>`
+  first. If the newest row is `(running)` and started after your `unblock`, the
+  notification is about the old run. Answer in one line (old run, already fixed, current
+  run live since HH:MM) and change nothing.
+- **"뭐가 block 상태야?" — list every blocked card with a reason class, not only the one you are tracking.** Run `kanban list --json` filtered to blocked/scheduled/triage. For each card, read the last `blocked {reason}` event and put it in one of three classes: normal wait (a remote or GPU run is in progress, with its ETA), user action needed (give the exact step, e.g. a licence page URL), or stale. For a stale card (days old), re-check its preconditions against the current files, such as a pinned md5 or whether the edit already landed. Then recommend archive or re-scope rather than unblock, because an old body resumed as written stops at once or edits the wrong state.
+- **Headless workers cannot pass approvals.** Force pushes, protected files such as
+  `AGENTS.md`, `pip install`, and container lifecycle commands (`docker compose restart|up`
+  for a deploy step) all block. Design the card around that (draft + user `cp`,
+  local result + interactive push, numpy reimplementation). Never route around the security
+  scan. Before `create`, grep the body file for `AGENTS.md` and other protected names. A
+  protected file never goes on a headless card, not even inside a "update the date in
+  AGENTS·OPS·WORKLOG" doc card that looks routine; the card edits the rest and blocks on
+  that one line.
+  A `capability` block for a missing environment piece (a package or a native library the
+  worker may not install) is setup, not authorship. Install it from the interactive
+  session. Then re-run the exact import the worker reported failing, comment the fix on
+  the card and `unblock`. The worker writes no code until it is unblocked. Put the import
+  check into the first card's step 1, so the block fires before any work starts.
+  For a deploy step, order the card as commit → tests → deploy, and write "if the restart
+  is refused, do not block; hand off with request-review and put the exact command in the
+  summary". A block/unblock cycle counts toward the failure limit and costs an extra wake.
+  Before reviewing, the orchestrator runs only that one command, touching only the named
+  service, and verifies it (host vs container sha of the changed files, other containers'
+  StartedAt unchanged, the live probe). It comments the results on the card so the review
+  run does not repeat them. If deploy comes before commit,
+  the block leaves uncommitted work behind. Put the exact replacement line in your reply instead. Offer to apply it yourself
+  once the user approves (single-file commit, diff = 1 line), or let him paste it.
+  - Ask for the `cp` only after the last card that edits the draft is approved; otherwise the
+    user installs a stale file. Leave the parent blocked meanwhile, and `unlink` it from the
+    editing child so the child is not stuck waiting on it.
+  - If the user tells you to do the copy yourself, first check `diff` shows only the
+    intended lines. Then make the current file recoverable. If `git diff --quiet HEAD -- <file>`
+    passes, the last commit is the backup. Otherwise write `AGENTS.md.bak_<date>_<reason>`.
+    Copy, verify with `cmp`, and commit that path alone (`git commit -- <file>`, never `-a`).
+    A git-ignored file (`git check-ignore -v`) cannot be committed: the `.bak` + `cmp` is the record. Comment it on every running card that
+    must follow the new rule, and complete the blocked parent.
+  - Later rule additions go into the same reviewed draft file. Diff the draft against the
+    committed file before each copy, since the user approves the whole delta, not just the
+    newest line.
+- **Scarce remote quota (GPU hours): guard on two layers.** Put a pre-push checklist comment
+  on every card and run a `no_agent` push watchdog cron. Cards that wait on a remote job use
+  short status calls, never long foreground wait loops.
+- **A resource-limit block is a card-design defect.** Re-scope so the limit stops binding;
+  never authorise deleting the user's data to keep a bad plan running.
+- **A remote capacity refusal (GPU-session cap full) is a wait, not a decision.** Comment a
+  retry interval + cutoff ("never touch another project's job; refused attempts are not
+  pushes") and unblock. Park cards waiting on a remote job and have a no-agent status cron
+  release them. The recipe is in `references/recovery.md`.
+- **Your own blocks count toward the failure limit.** Redirect idle cards with `comment`,
+  not `block`. Avoid `reclaim`→`block` and quick `unblock`/`block` cycles; `triage` can only
+  be left through `archive`. A card in `triage` can also be picked up by the auto-decomposer
+  and re-promoted with a rewritten title and body. The worker then blocks again for the
+  same missing decision, and you get a second triage notification. Once a card lands in
+  `triage`, archive it with a comment that records its results and why it stopped. Carry
+  the work on in a new card that is created only after the user decides.
+  The decomposer can also split a blocked card into several new child cards, and one of
+  them starts running at once. That repeats side effects the parent was capped at, such as
+  a second push. Right after any block or triage event, run `ls`. Archive every
+  `auto-decomposer` card, using `show` → `created ... by auto-decomposer` to identify
+  them. Kill the live worker pid of each, then confirm with `ps` and the remote status that
+  nothing ran. To prevent it, write "do not decompose this card into sub-cards" in the
+  body of every card that has an irreversible step.
+- **Check the side effect before killing a run you think is in the wrong mode.** Unblocking a
+  card that was blocked from `review` returns it to `review`; after reassigning it to the
+  worker, the dispatcher starts the worker with the review skill, and that run can still
+  execute the PUSH_OK step. Before `kill`, read the remote state (`<platform-cli> jobs list
+  --mine`, `kernels status`, submissions list). If the side effect already happened, do not
+  kill. If you already did, comment "already pushed at <time>, do NOT push again; only wait,
+  collect and verify" before the next run claims it.

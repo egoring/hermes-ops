@@ -76,3 +76,15 @@ notice:
 4. Comment to the survivor what is done and what it must not repeat ("v1 already pushed
    and COMPLETE, do not push again; only re-check gates and request-review").
 Never let two runs reach an irreversible step (push, submit) on the same card.
+
+## Cards fed by a detached job
+
+- **A card whose deliverable comes from a detached job (a `nohup` launcher on the GPU box that waits for its inputs and then trains) must not sit in `ready`/`review` while that job runs.** Each worker run finds no result yet and hands off "results pending", and every review of that hand-off returns it, so the card ping-pongs. Each lap spends a coder run and a reviewer run. Park it instead. The steps are below.
+  1. Run `reopen-review <id> --reason "[dependency wait, not a rejection, 0/3] ..."` (this works only while the card is in `review`).
+  2. Run `kanban schedule <id> "<which result file releases it>"`.
+  3. Add a no-agent cron (every 15 min, one-shot flag file) that runs `unblock` when the result file appears, or when the launcher process count is 0 and there is no result file (the launcher died, so the coder must investigate). Route its message through quiet-hours `emit()`.
+  4. A card that waits on another card's artifact (e.g. a kernel that needs a checkpoint still training) instead gets `link <producer> <card>`, and it becomes ready when the producer completes.
+  5. When you return such a hand-off, label it "dependency wait, not counted" so the round counter stays honest.
+  6. A stage handoff that starts the long job (request-changes "[stage handoff] start fold0") must be followed by your own `schedule` as soon as the worker's "started" comment lands. "Do not block" in the reason does not stop the worker from blocking at its terminal call, and that block plus the earlier ones sends the card to triage, where the auto-decomposer splits it.
+- **A worker that hands off mid-wait ("1/2: built and pushed, kernel RUNNING") spawns a reviewer run that holds the card.** `schedule` is refused on a card in `review`. Do not park it from the chat. Instead, comment to that run: verify the build stage, do not `complete`, park the card for the external wait. Then make the release cron `assign <id> coder-bot` + `unblock` on the terminal kernel status. The resulting `blocked` notice is your own parking; answer it in one line. Better: in the body, tell the worker to request review only once the external job has finished.
+- **A card you `schedule` from `review` keeps `assignee: reviewer-bot`.** A release cron that only runs `unblock` would then spawn a reviewer run instead of the implementer. Make the cron run `assign <id> coder-bot` before `unblock`, and confirm `show` reads the implementer after the release.

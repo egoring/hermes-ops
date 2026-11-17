@@ -52,7 +52,7 @@ STOP = set("지금 이거 그거 저거 그냥 좀 혹시 어떻게 뭐야 뭐�
            "진행 추천 준비 설계 의견 일단 계획 검토 대로 해보자 까지만 점검 순서 알려 받은 처음 같이 잡아 붙이려면 "
            "the a an to of and or for in on is are be it this that with how what can do please".split())
 # 단독으로는 추천 근거가 약한 단어 (이 단어 하나만 맞으면 이름에 걸려도 후보로 안 친다)
-GENERIC = set("모델 코드 테스트 로그 검색 서버 설정 봇 리뷰 웹 이미지 문서 노트 스킬 프롬프트 메모리 학습 평가 배포 "
+GENERIC = set("모델 코드 로그 검색 서버 설정 봇 리뷰 웹 이미지 문서 노트 스킬 프롬프트 메모리 학습 평가 배포 "
               "알림 영상 에이전트 구조 개선 방향 함수 설계 대회 "
               "ai md claude sonnet opus gpt api cli "
               "model code test log search server config bot review web image skill prompt agent".split())
@@ -63,6 +63,10 @@ LOCAL_SYN: dict[str, list[str]] = {
     # 비워 둔다: 동의어 원본은 hermes-hub apps/web/src/lib/skill-search.ts SYNONYMS (11-11 통일).
     # 배포 전에 급히 고쳐야 할 때만 여기 넣고, 다음 배포 때 hub로 옮긴다.
 }
+
+
+# 첫 질문에서만 구체적인 단어로 친다 (대화 중간의 "테스트해줘", "테스트할 수 있게" 같은 지시는 흔한 말)
+FIRST_TURN_ONLY = set("테스트".split())
 
 
 def is_generic(t: str) -> bool:
@@ -181,6 +185,8 @@ def shared_names(profile: str) -> set[str]:
 # ---------- 점수 ----------
 def score_all(index: dict, text: str, profile: str, strict: bool = False) -> list[dict]:
     """strict=True (대화 중간 턴): 구체적인 단어가 스킬 이름에 직접 맞은 후보만."""
+    def gen(t: str) -> bool:
+        return is_generic(t) or (strict and any(t.startswith(g) for g in FIRST_TURN_ONLY))
     syn = {**(index.get("synonyms") or {})}
     for k, v in LOCAL_SYN.items():
         syn[k] = list(dict.fromkeys([*syn.get(k, []), *v]))
@@ -203,14 +209,14 @@ def score_all(index: dict, text: str, profile: str, strict: bool = False) -> lis
             if w:
                 total += w + (10 if s["name"].lower() == t else 0)
                 hits.append(t)
-                strong = strong or (w == 10 and not is_generic(t))  # 구체적인 단어가 이름에 맞음
+                strong = strong or (w == 10 and not gen(t))  # 구체적인 단어가 이름에 맞음
                 # 이름·영문 설명에 맞은 단어 (한국어 요약은 자동 생성이라 흔한 단어가 잘 걸린다)
                 anchor = anchor or any(contains(fields[f], a) for f in ("name", "description") for a in alts)
         # 한국어 요약에만 맞았으면 근거가 약하다: 구체적인 단어 3개 이상 + 점수 18 이상일 때만 (11-16 디스코드 실측 보정)
-        if not anchor and (len([t for t in hits if not is_generic(t)]) < 3 or total < 18):
+        if not anchor and (len([t for t in hits if not gen(t)]) < 3 or total < 18):
             continue
         # 구체적인(GENERIC 아닌) 단어 2개 이상이 맞거나, 구체적인 단어 하나가 이름에 맞아야 후보
-        specific = [t for t in hits if not is_generic(t)]
+        specific = [t for t in hits if not gen(t)]
         if strict and not strong:
             continue
         if total >= MIN_SCORE and (len(specific) >= 2 or strong):
@@ -220,7 +226,14 @@ def score_all(index: dict, text: str, profile: str, strict: bool = False) -> lis
     return [c for c in out if c["score"] >= out[0]["score"] * REL_CUTOFF] if out else out
 
 
+def qhash(text: str) -> str:
+    import hashlib
+    return hashlib.sha1(text.encode("utf-8", "ignore")).hexdigest()[:10]
+
+
 def log(line: str) -> None:
+    if os.environ.get("SKILL_RECOMMEND_NOLOG"):  # 평가 스크립트 실행은 기록하지 않는다
+        return
     try:
         LOG.parent.mkdir(parents=True, exist_ok=True)
         if LOG.exists() and LOG.stat().st_size > 1_000_000:
@@ -288,7 +301,9 @@ def main() -> int:
         return 0
     cands = score_all(index, text, profile, strict=not first)[:TOP_N]
     ms = round((time.perf_counter() - t0) * 1000)
-    log(f"platform={platform} profile={profile} {ms}ms cands={[(c['name'], c['score']) for c in cands]}")
+    # q= 정제된 질문의 지문 (평가 재생이 대화 기록과 정확히 짝짓게), first= 첫 턴 여부
+    log(f"platform={platform} profile={profile} {ms}ms cands={[(c['name'], c['score']) for c in cands]} "
+        f"first={int(first)} q={qhash(text)}")
     if cands:
         print(json.dumps({"context": build_context(cands)}, ensure_ascii=False))
     return 0

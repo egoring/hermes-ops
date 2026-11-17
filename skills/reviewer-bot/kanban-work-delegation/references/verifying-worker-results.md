@@ -1,5 +1,26 @@
 # Verifying worker-reported results
 
+## Contents
+
+- Verification gates
+- Check what a branch gate compares against
+- A baseline that returns nothing is not a comparison
+- A reported zero is a claim about a classifier — recount it mechanically
+- Check the headroom of any adopted limit
+- Plumbing gates on a tiny smoke input
+- Read rewritten text artifacts as bytes, not through the read tool
+- Fail-closed guards: attack every way they can quietly weaken
+- Derived quantities are not measurements
+- A null sweep can mean the knob was never in the path
+- The sample-size trap
+- Designing acceptance criteria under noise
+- A combination found on the evaluation data is a hypothesis
+- Reproducing from the README alone
+- Re-pointing your own probe at a new artifact
+- Reporting
+- Judging by the pre-registered rule (step 6)
+- File-operation and doc-correction claims (step 6)
+
 A worker's final summary is a self-report. Treat every number in it as a claim until you
 have reproduced it from an artifact. Workers are not usually dishonest — they are
 optimistic, they accept their own framing, and they report the criterion they remember
@@ -263,3 +284,47 @@ the worker's own summary will not.
 When the next step spends a slot whose score is max-of-selected (leaderboard submissions),
 say so in the recommendation: a worse arm cannot lower the kept score, so submitting both
 arms of a fixed pair costs only the slots and buys the direction of the effect.
+
+## Judging by the pre-registered rule (step 6)
+
+Take every time label in an amendment or pre-registration from `date`; a label later than the real post time reads as a post-result edit.
+
+**Judge a measurement card by its pre-registered rule as written, never by a metric you
+thought of after seeing the results.** If the wording is ambiguous, read it by its intent.
+"Same accuracy and −30% tokens" means "accuracy not lower", not "exactly equal". A concern
+the rule did not measure goes on the card as a separate decision-info table, labelled "rule
+limit, not in the verdict". Examples are the extra LLM call's own tokens and the end-to-end
+latency the user feels. Using such a concern to flip the verdict is moving the goalposts,
+and the dispatched review will rightly bounce your approval. When you write the next rule,
+fix the gap there. For an LLM post-processor, define efficiency end to end: every call's
+tokens, and retrieval plus answer latency against the interim threshold.
+If the design lists a known limitation that could move a gate, write it into the pre-registered rule itself. Use an exclusion criterion, a stratum, or a gate computed only on unaffected units. A limitation that lives only in a "limits" paragraph does not stop the gate from failing on it. That FAIL then has to be reported as the verdict, with the limitation as labelled decision info and an override offered to the user. One extra rule line written before the run removes that whole decision round.
+
+When your chat-side human grading and the dispatched review's differ on a measurement card, report the dispatched number, scored by the pre-registered rubric, as the official one. Give your reading next to it as a labelled dissent with its reason, e.g. "the answer key is ambiguous because the new document is titled 조정안". Put the item's design flaw on the next pack's spec, not into this score.
+
+**Re-running the worker's own script proves only that it is deterministic, not that its counts are right.** Before a chat-side "🔴 없음", check each headline count's definition against the raw records with an independent probe. Typical traps: a cap counted from trace length that includes rejected calls, a "first edit" that includes scratch-file writes, and "arguments not visible" when the trace does keep them. One rerun-only opinion got three headline numbers wrong in a doc already sent to the user, and the dispatched review bounced them.
+The same holds for a worker's "dry-run exit 0": before agreeing, check which venv/library versions it ran under (see Deployability in `references/verifying-worker-results.md`). Matching the summary against the raw tables does not catch a dry-run run on the wrong environment.
+
+State residual weakness even when every gate passes — a criterion cleared by a hair, or a
+confidence interval still spanning zero, belongs in the report next to the PASS.
+
+## File-operation and doc-correction claims (step 6)
+
+**Also verify file-operation claims by listing, not by reading the summary.** "Deleted X"
+is routinely reported when the file was overwritten, moved, or left in place; one `ls` or
+`diff -q` settles it, and an unverified file claim is the kind that turns into a real
+accident on the next card. "Output unchanged" claims get the same check: compare the
+**set** of output names before and after, because a worker that diffs only same-named files
+misses a newly created output. The same goes for a reported commit hash: check it with
+`git log --all --oneline`, because workers amend after writing the summary and the quoted
+hash may not exist.
+Cards that finish without review (helper-bot) need this check most. A helper told to
+"append one section" to a work log rewrote three past lines with `\"` escapes in place of
+`"`. Right after such a card, run `git show <hash> -- <log>` and require zero removed
+lines. Put the restore on whichever running card already edits that file, so two cards
+do not edit it at once.
+**Give every doc-correction card grep-count completion criteria for each defect it fixes**, e.g. `grep -c '^|- ' <file>` = 0, `grep -c '<old timestamp>'` = 0, and the expected count of the new string. List every occurrence of the defect too, including table rows and detail sections that repeat the same value. A fix written only as "replace X with Y" got done in one place and left in another, and a format fix (`||-` → `|-` instead of `- `) got applied the wrong way. Each miss cost a full card round.
+For a card that aligns a runbook with a new user decision, derive the grep terms from **every concrete token the old plan used**: times (`08:30`, `14:30`), subcommands (`run`), step names and owners. Run that grep over the whole doc yourself before writing the card and list each hit with a fix-or-keep verdict. Also grep the **scripts the runbook tells the operator to run** for the instructions they print (usage text, failure hints such as "to undo: … --rollback"). Those strings are runbook text the operator reads first, and a doc-only grep passed while a script still printed the now-unsafe step; the review bounced it. A spec that named only the four places you remembered left two contradicting sentences (a timetable row, a tool-budget line), and the round bounced. After one helper miss on a format-exact edit, send the next correction to the coder tier with those counts. Re-run the counts yourself before calling it done.
+For a file the worker rewrote, check its first bytes (`od -c <f> | head -2`), not only its
+rendered content: a worker that edits through a line-numbered read tool can write the `N|`
+prefixes into the file, which `cat`-style views and the worker's own grep hide.

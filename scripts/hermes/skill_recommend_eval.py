@@ -29,6 +29,10 @@ CASES = [
     ("default", True, "논문 찾아서 정리해줘", "arxiv"),
     ("reviewer-bot", True, "칸반 카드 리뷰어한테 넘겨줘", "kanban"),
     ("reviewer-bot", True, "캐글 리더보드 순위 확인해줘", "competition"),
+    ("reviewer-bot", True, "주문 승인 API 테스트 케이스 설계만 해줘: 승인 없이 출고 불가, 권한 없는 역할 거부, 중복 승인, 취소 후 재승인", "testing-strategy"),
+    ("reviewer-bot", True, "알림 큐를 Redis로 할지 SQS로 할지 장단점 비교해서 정해줘", "architecture"),
+    ("reviewer-bot", True, "점심 짜장면이랑 김치찌개 중에 하나만 골라줘", None),
+    ("coder-bot", False, "테스트 돌려봐", None),                       # 중간 턴 짧은 지시는 추천 불필요
     ("coder-bot", False, "pdf에서 텍스트 뽑아줘", "pdf"),                # 중간 턴이라도 짧고 구체적이면
     ("coder-bot", False, "langfuse 트레이싱 붙여줘", None),             # coder-bot엔 langfuse 없음
     ("coder-bot", True, "안녕", None),
@@ -41,8 +45,12 @@ CASES = [
 ]
 
 
+sys.path.insert(0, os.path.dirname(HOOK))
+import skill_recommend as SR  # noqa: E402  (message_text·qhash 를 훅과 똑같이 쓰려고)
+
+
 def run(profile, first, msg):
-    out = subprocess.run(["/usr/bin/python3", HOOK], capture_output=True, text=True,
+    out = subprocess.run(["/usr/bin/python3", HOOK], capture_output=True, text=True, env={**os.environ, "SKILL_RECOMMEND_NOLOG": "1"},
                          input=json.dumps({"profile": profile, "extra": {"user_message": msg, "platform": "discord", "is_first_turn": first}})).stdout
     return [x[2:].split(":")[0] for x in (json.loads(out)["context"].splitlines() if out else []) if x.startswith("- ")]
 
@@ -73,12 +81,18 @@ def main():
         if not os.path.isfile(db):
             continue
         c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        row = c.execute("select id, session_id, content from messages where role='user' and abs(timestamp-strftime('%s',?,'-9 hours'))<=3 "
-                        "order by abs(timestamp-strftime('%s',?,'-9 hours')) limit 1", (ts, ts)).fetchone()
-        if not row:
+        rows = c.execute("select id, session_id, content from messages where role='user' and abs(timestamp-strftime('%s',?,'-9 hours'))<=15 "
+                         "order by abs(timestamp-strftime('%s',?,'-9 hours'))", (ts, ts)).fetchall()
+        qm = re.search(r" q=(\w+)", l)
+        if qm:  # 지문이 있으면 정확히 같은 질문만 (동시에 들어온 메시지 뒤바뀜 방지)
+            rows = [x for x in rows if SR.qhash(SR.message_text(x[2])) == qm.group(1)]
+        else:
+            rows = [x for x in rows][:1]
+        if not rows:
             continue
-        mid, sid, content = row
-        first = c.execute("select count(*) from messages where session_id=? and id<?", (sid, mid)).fetchone()[0] == 0
+        mid, sid, content = rows[0]
+        fm = re.search(r" first=(\d)", l)
+        first = (fm.group(1) == "1") if fm else c.execute("select count(*) from messages where session_id=? and id<?", (sid, mid)).fetchone()[0] == 0
         got = run(prof, first, content)
         n += 1
         had += "cands=[(" in l

@@ -30,3 +30,59 @@ Use whenever a card, delegate_task, or cron produces a result the user is waitin
   Fix the reviewer's own operational defects that it flags (watcher scripts, markers) in the same turn as the user's "추천대로".
 - **A watcher reports only what it was told to watch.** A submission watcher keyed on a `watch` list in its state file never discovers new refs; every submit card (or queued-submit script) must append the new ref with a note, and the reply that announces the submit names the ref and confirms the watcher entry. When the user reports a score you did not post, check the watch list before blaming delivery.
 - Before deleting a no_agent cron that uses `quiet_hours.emit`, check `cache/quiet_hold/<name>.jsonl`: held 23-09 messages flush only on that same job's next daytime run, so deleting the job strands them.
+
+## Route notifications through yourself (step 5)
+
+```bash
+hermes kanban notify-subscribe <id> --platform <p> --chat-id <id> --thread-id <id> \
+  --chat-type thread --notifier-profile <orchestrator> --delivery-mode wake
+```
+
+`--delivery-mode` choices: `notify` pastes the worker's own summary into the chat;
+`wake` wakes the orchestrator to read the board and speak in its own voice; `notify+wake`
+does both. **Use `wake` when the user should hear one voice** — `notify+wake` leaks the
+worker's raw summary and looks like the worker is answering directly. Re-running
+`notify-subscribe` on an existing subscription updates it in place.
+Every `wake` replays the orchestrator's whole chat context. Use `wake` for completion
+and decision events, and `notify` for intermediate ones (review requested,
+handed off), which a dispatched reviewer run already handles.
+
+To watch another board's card from this thread, subscribe to it here. Remove it with
+`notify-unsubscribe <id> --platform <p> --chat-id <id> --thread-id <id>` once the
+dependency is gone. Otherwise its events keep landing in the wrong conversation.
+
+**Moving a project's alerts to a new thread ("크론 답변 여기서 하게 해줘") has three layers; do all three in one script.**
+1. Cron jobs: `hermes cron edit <id> --deliver <platform>:<chat>:<thread>` for every job of the project. A job set to "origin" follows the chat that created it, so pin it explicitly. Remove a watcher cron whose trigger already fired (e.g. an access-approval poller), rather than moving it.
+2. Scripts: grep the profile's `scripts/` for the old thread id. Watchers that auto-subscribe new cards often hard-code it. Replace it, `py_compile`, and print old-id hits = 0.
+3. Card subscriptions: dump `notify-list` first and keep each card's delivery mode. For every open card, `notify-subscribe` the new thread **before** `notify-unsubscribe` of the old one, so no event falls into a gap. Then print the list again and check every card shows the new id.
+Also update the thread id in the project skill note, or the next session's card template brings back the old thread.
+
+**Live progress in the chat for a long worker job.** "Can I watch it here" means periodic
+aggregates, not a stream. Stream the raw work only if it contains no restricted content
+and would not flood the thread; neither is usually true. Recipe:
+- The card makes the worker keep a `progress.json` with fixed field names: done/total,
+  batches, failures, ISO start and last-update times, running cost, per-category rates.
+  Post the field list as a card comment too.
+- Create a `cronjob_manage` job with `no_agent=true`, a script in the profile's `scripts/`,
+  `deliver=<platform>:<chat>:<thread>`, `failure_deliver=local`, every 30 min. The script
+  prints one summary line with an ETA. It prints nothing when unchanged or not started, and
+  warns **once** when progress stalls. Test it on a fake progress file first: fresh,
+  unchanged and stalled cases.
+- It costs no tokens and never sends restricted text (e.g. competition data).
+- **Respect the user's quiet hours (23:00–09:00 local).** No-agent alert scripts must not
+  print during that window. Route their output through a shared helper
+  (`scripts/quiet_hours.py` `emit(msgs, name)` in the profile). Overnight it appends to a
+  hold file and prints nothing. The first run after 09:00 prints "held overnight: N" and
+  then the held lines. Test it on 22/23/00/08/09 o'clock timestamps. Your own @-mentions
+  follow the same window: overnight wake-ups get a short reply with no tag. When the user lifts the window for specific work ("시간상관없이 알려줘"), scope the exception to those cards. Comment it on each card (approve/bounce/block results may tag overnight; this card only) so the dispatched review run follows it too. Do not set the global `OVERRIDE_UNTIL` file for this, because it also releases every unrelated cron alert overnight. Tell the user that other alerts stay quiet. Tell the user
+  two things. Card-event wake-ups still post to the thread overnight; muting the thread to
+  mentions-only silences them. A held duplicate-GPU alert costs up to one session of
+  quota, so offer to exempt that single alert class.
+- `hermes cron create --script` takes a script name only, with no arguments. To reuse a
+  parameterised watcher (slug, state file, label, warn hours), have the card add a small
+  wrapper script in the profile's `scripts/`. The wrapper imports the watcher's `check()`,
+  calls it with fixed arguments, and prints through `emit()`. Before you register it, test
+  it with a fake `status_fn` and a temporary state file. Then run it once for real: while
+  the job is still running it must print nothing.
+- Pause a progress cron once its job is finished (`hermes cron pause <id>`), and do not leave
+  it posting "no change".

@@ -48,9 +48,15 @@ Off switch to tell them: delete the `hooks:` block or `hermes -p <p> hooks revok
 - **Latency.** Keep per-turn work local (tens of ms). Fetch remote data into a cache file;
   when stale, spawn a detached refresh (`start_new_session=True`, a lock file to avoid storms)
   and use the old cache this turn; fetch synchronously (≤2 s) only when no cache exists.
-- **Scope to human turns.** Skip platforms outside an allow-list (kanban workers, cron) and
-  messages starting with system markers (`[IMPORTANT: Background process`, `[CONTEXT COMPACTION`,
-  `/` commands, `# Kanban task`).
+- **Scope to human turns.** Skip platforms outside an allow-list (kanban workers, cron), payloads
+  with `extra.kanban_task_id`, and messages starting with system markers (`[IMPORTANT`,
+  `[System:`, `[CONTEXT COMPACTION`, `/` commands, `# Kanban task`) — and `[kanban]` after the
+  `[nickname]` prefix is stripped: kanban completion notices reach Discord threads as user
+  messages and were ~40% of all candidate turns.
+- **First turn vs mid-thread.** Recommend broadly only when `extra.is_first_turn` (absent =
+  treat as first). Mid-thread, skip messages over ~150 chars and keep only candidates whose
+  specific word hits the skill NAME — long work instructions otherwise match common words, and the
+  model (often with the right skill already loaded) ignores every candidate.
 - **Strip non-question text before scoring.** Desktop attachments follow `--- Attached Context
   ---`; Discord uploads arrive as `[The user sent a text document: …]` + `[Content of <file>]`
   with the whole body inline; Discord prefixes `[nickname]` and `<@id>` mentions. Scoring a
@@ -68,8 +74,11 @@ installed+shared profiles, Korean→English synonyms):
   field only (OR across alternatives).
 - Strip Korean particles/endings, drop stop-words that are request verbs and filler (진행·정리·
   확인·추천·설계·준비·파일·상태 …) — they otherwise match half the library.
-- Keep a GENERIC set (모델, 코드, 봇, 리뷰, 테스트, 알림, 에이전트 …): a candidate needs ≥2
-  non-generic hits or one non-generic hit on the NAME.
+- Keep a GENERIC set (모델, 코드, 봇, 리뷰, 테스트, 알림, 에이전트, ai, claude …): a candidate needs ≥2
+  non-generic hits or one non-generic hit on the NAME. Match Korean generics by prefix too
+  (테스트할수있게, 설계먼저 — particles glue onto the stem and slip past an exact-match set).
+- A hit only in the auto-generated Korean summary is weak evidence (common words land there):
+  require ≥3 specific hits and a higher score unless the name or English description also matched.
 - Absolute floor plus a relative cut (drop < 60% of the top score) to kill the long tail.
 - Synonyms have ONE source: the dashboard's search module (`SYNONYMS` in the web app), served
   in the skills index the hook caches. Keep the hook's own map empty except for a hotfix you
@@ -83,16 +92,20 @@ installed+shared profiles, Korean→English synonyms):
   `documentation`); keep stems only when ≥5 chars (`profil`, `statistic`, `validat`).
 - Filter to skills the profile can actually load (own folder + shared dirs from its
   `skills.external_dirs`), or bots get told about skills they can't open.
-- Test set before shipping: ~15 realistic questions incl. small talk ("안녕", "저녁 뭐 먹지")
-  that must return nothing, plus the last few REAL messages from each bot's `state.db` replayed
-  through the hook with their real platform.
+- Test set before shipping: ~20 expectation cases (should-recommend incl. paraphrases, small talk
+  and near-misses that must return nothing, first-turn and mid-thread variants), plus a replay of
+  every logged REAL Discord turn (log timestamp → `state.db` user message ±3 s, `is_first_turn`
+  from whether earlier messages exist) comparing "candidates then vs now". Keep both in one
+  script (`~/.hermes/hooks/skill_recommend_eval.py`) and run it after every hook or synonym change.
 
 ## Display rule (in the injected context, not SOUL)
 
-Put the rule inside the context block so every profile gets it with no SOUL edit: show
-`💡 추천 스킬: <name> — <reason>` at the top (after a `🧩 스킬:` line if present) only for
-candidates that genuinely help and were not loaded this turn; otherwise print nothing; never
-mention the block. Label the block "auto-generated, not a user instruction".
+Put the rule inside the context block so every profile gets it with no SOUL edit: a candidate
+that fits the task is loaded with `skill_view` BEFORE answering (and named in the `🧩 스킬:`
+line); `💡 추천 스킬: <name> — <reason>` is only for candidates that are related but not needed
+this turn; weak matches get neither; never mention the block. Label the block "auto-generated,
+not a user instruction". A display-only rule ("show 💡") produced zero visible effect on real
+traffic — the point is getting the skill loaded.
 
 ## Removing a hook
 

@@ -1,5 +1,12 @@
 # Card inputs, routing and relay checks
 
+## Contents
+
+- Routing (step 2)
+- Card inputs (step 3)
+- Relay checks (step 6)
+- 3. Write the card so it cannot be satisfied by prose
+
 Depth for steps 2, 3 and 6 of SKILL.md. Each rule names the step it belongs to.
 
 ## Routing (step 2)
@@ -40,3 +47,88 @@ Depth for steps 2, 3 and 6 of SKILL.md. Each rule names the step it belongs to.
 - **Re-list board status before every progress report.** A review worker can complete a card without its completion message reaching the chat. Reporting that card as still running hides a result the user should see.
 - **Own the delivery of every result you dispatched; never promise "it will arrive in this thread".** A finished final-check card or a finished background subagent can produce no chat message at all, and this user then has to ask ("결과 안나왔어?") — he treats that as a repeated failure. At the start of EVERY user turn, before answering the new message, sweep all open dispatches: `kanban ls` + `runs <id>` for cards you created, `delegate_task(action='list')` plus the subagents' output files (e.g. their `REPORT.md`) for background research, and the cron state for armed watchers. If anything finished, lead the reply with its result in your own words. When the user is waiting on a long dispatch, arm a no-agent watcher that posts once on completion instead of relying on the runtime to relay it. Say "I will check and report", not "the result will come here". An armed watcher cron does not replace the sweep: cards chained with `--parent` can finish inside one turn gap and the watcher can miss or lag them, so re-read `runs <id>` for every card you created in the thread anyway.
 - When another session raises a leak or bias concern about a probe, first check what the probe actually did (scope, split, controls) from its script. Answer with that before re-running anything.
+
+## 3. Write the card so it cannot be satisfied by prose
+
+Every card body needs:
+- **Background with the real numbers**, so the worker does not re-derive them.
+- **Numbered deliverables**, each with the artifact path it must produce.
+- **Exact expected values** where they are already known, plus "if this does not reproduce,
+  the implementation is wrong — stop and report". A self-check the worker cannot fudge is
+  worth more than any amount of instruction.
+- **A ban list**: approaches already measured and rejected, with where the rejection is
+  recorded. Without it workers re-propose dead ends.
+- **Explicit permission to conclude "no improvement found"**. Without this line a worker
+  manufactures a recommendation to look productive — the same failure mode that produced
+  the bad input in the first place.
+- **A ban on modifying the file under study.** Analysis cards should name the artifact as
+  read-only and require new files for anything the worker produces, so the measurement
+  baseline survives the card. State where a pristine baseline copy lives so scope can be
+  checked with one `diff`.
+- **Check every object a criterion names before writing it.** grep for the endpoint, file
+  or setting ("/healthz 200"). A criterion on something that does not exist becomes a
+  spec defect at review. A card that rebuilds and redeploys an image also ships every
+  commit made since the running image was built. List those commits in the card, and state
+  whether their default-off features keep the "behaviour change 0" claim true.
+  When a criterion spans several configurations ("≥14/15 legit answers in full and rag"),
+  check that every item can be answered in every configuration. An item a mode cannot
+  answer by structure turns a faithful card into a false failure; for example, a count over
+  a whole table cannot work in a top-k retrieval mode.
+- **Run every code or command template you write into a spec exactly as written before posting it.**
+  This covers prompt patterns the shipped artifact will show a model, snippets the worker must
+  insert verbatim, and replacement blocks. Copy the block out of the card file, swap only a temp
+  path in, and run it. Markdown formatting changes code: list indentation in front of a heredoc
+  makes the terminator line invalid, and the copied body raises IndentationError. Neither the
+  worker nor the review run catches it, because both implement the text faithfully. Treat a
+  template that fails this way as a spec correction, not as the worker's 🔴.
+- **Write any detector or classifier rule in a spec as value-based plus a visible safety net, never as a header/keyword whitelist.** Examples are person columns, year columns, refusal detection and numeric roles. A whitelist fails silently on the first shape you did not list, and every round of review finds a new one. Specify all four parts: the value criterion, which way to err (over-mask for privacy, warn for numbers), a run-time report or invariant that lists what was classified and flags what was dropped, and an adversarial fixture of shapes absent from the corpus. Then test the rule on such inputs yourself before you post the card.
+  **The direction flips for rules that decide what to expose.** Examples: keeping names on a staff list, attaching an identifier column to a precomputed answer. Write those as an allowlist of known-safe headers (non-person object stems). An unknown or generic header exposes nothing. A blacklist ("skip person-like headers") fails open whenever the header carries no information. In one case a headerless-table detector renamed columns 열1…열N, so the blacklist matched nothing and the always-on aggregate printed farmer codes.
+  A **list of markers to strip before matching** (honorifics, bracket tails, title words) fails the same way as a keyword list: every unlisted marker is a new leak. A naive boundary rule ("name-shaped prefix + non-letter") swings the other way and masks real label columns. What closes the class is a second, **column-level** decision: count distinct candidate tokens across the column, then add a companion check that tells labels from names. A label prefix is followed by many different words. Gate it with a **seeded random generator of realistic mixed columns** (several seeds; silent misses 0, false masks on non-target columns 0), plus byte-identical output on existing corpora. Do not gate it on a hand-written case list. Probe the rule yourself on real-corpus shapes before posting it as a spec correction; your proposal is a spec and can be wrong.
+  **Write a multi-signal detector as a three-way vote, never "any one X matches" and never a bare "every X matches".** Each signal says yes, no, or abstain, and abstains when it carries no evidence (too few non-zero values, mixed signs, all zeros, blank). Fire on ≥1 yes and 0 no. "At least one measure column equals the sum of the others" dropped real rows on sparse small-integer columns, where coincidences are common. The correction "in every non-empty column" then missed the real total rows, because their sparse and ± cells cannot match and counted as no. Both wordings were in reviewer specs, one round apart. Probe each spec clause with a coincidence fixture (false positive) **and** a true target whose other signals are non-evidence shapes (false negative) before posting.
+  When a spec defines adjacency ("X directly followed by Y"), list every joiner the data uses: attached, one space, `:`/`：`, a bracket, full-width forms. A spec that named only "attached or one space" leaked `김민수(조합원)` 10/10, a common table-cell form.
+  Specify the allowlist as a **full match on a closed grammar** ([modifier]? + object noun + [suffix such as 명/번호/코드]?), never as "header contains a stem". Korean compounds put the head noun last, so a substring allowlist passes 품목 출하처, 사업자번호, 시설(이용자). One such spec phrase leaked codes under 20 of 22 person headers. Probe compound, bracketed, full-width and separator forms (선박（선주）, 선박/선주), not single-word headers.
+- **When a card adds a step that removes or rewrites a signal, list every downstream consumer of that signal and probe each one with the rewritten input.** Signals include headers, dates and file names. Two features in one card interact this way, and each feature's own tests pass.
+- **Pin byte-identical baselines to a commit, and say what to do if it moves.** A design card that fixes expected outputs at commit X goes stale when another card lands on the same module before implementation starts. A careful worker stops and asks. Write the rule into the body up front: rebuild the baseline at the current HEAD first, commit the diff against X, and stop to report if that diff goes beyond the expected list. Keep the numeric targets. When a worker does stop on this, answer with the HEAD rule and unblock in the same turn.
+- **When a spec records state before an action that can fail, state what happens to that state on failure.** Examples: a dedup or idempotency marker, a "sent once" flag, a reservation, a counter. A spec that only describes the success path gets implemented that way. The fixtures cover only success, so the tests pass, and the first transient error locks the user out of retrying. Write "keep on success, clear on <each failure outcome>" and add a fail-then-retry gate.
+- **Forbid moving the goalposts**: report shortfalls as numbers, never relax the criterion.
+  The same applies to you: when a fix card re-implements a decision rule the user already
+  approved (a verdict function, a gate), copy that rule verbatim. Adding a condition while
+  "tidying" it changes the verdict the run prints, and you then have to explain why the
+  printed verdict disagrees with the approved rule.
+- **State git expectations as two explicit yes/no lines** ("local commit: YES, message
+  `<msg>`; push: NO") and put `git status` empty + the commit hash in the completion
+  criteria. "Commit locally, push forbidden" written as one phrase gets read as "no git",
+  and the round trip costs a full review cycle.
+- **Size every absolute threshold to the sample before writing it.** A floor like "Hit@5 ≥
+  0.70" on n≈50 is inside the binomial noise of a result a few items short; prefer a paired
+  criterion against the previous version or baseline, or write the floor with its CI. A
+  floor missed only by noise is a spec defect: approve the faithful implementation, record
+  the miss, and raise the threshold question to the user instead of bouncing the worker.
+- **When a run has a time guard that can stop it early, order the items so every gate keeps its sample.** Interleave control items with the treatment items. Do not append them at the end, because a late cut then removes the whole control gate. Pre-register a minimum completed count per gate, below which that gate reads "not measurable" and nothing is promoted.
+- **Compute a metric's no-op and oracle values before writing a delta threshold on it,
+  and check that criteria can all hold at once.** A similarity score where "do nothing"
+  already reaches 0.96 cannot rise by 0.05; a success floor plus a per-item step cap can be
+  jointly unreachable on the real size distribution. Ask the card to print both reference
+  values first. When the worker flags such a conflict at review, decide each flagged item in
+  the approval comment (replacement metric or criterion, with its numbers) so the next card
+  inherits the corrected rule, rather than bouncing a faithful implementation.
+- **For public-facing text edits, ship the exact replacement sentences and an explicit
+  do-not-touch list.** Workers "improve" wording and replace every occurrence of a value;
+  name the lines to change, the look-alike occurrences to leave (e.g. measurement tables),
+  and make the diff hunk count a completion criterion.
+- **For verbatim rule/document insertions (AGENTS.md sections, templates), put the block in
+  its own file and require a block-level `diff` with 0 lines as a completion criterion.**
+  A code-fenced block inside the card body "to insert as-is" still gets paraphrased by
+  cheaper models (items merged, duplicated, tone changed) and the commit gets skipped.
+  Verify yourself with an awk-extracted block diff, the file md5, and `git show --stat`.
+- **For remote-history rewrites (force push), require a backup and remote verification**:
+  `git bundle create <path> --all` before touching anything, `--force-with-lease`, then
+  `git ls-remote` sha == local HEAD and an API read-back of what the user will see. Tell the
+  user about the force push and the backup path when you hand the card off.
+- **For any push card, anchor to the remote as fetched at run time, not a SHA from the chat.**
+  The user edits public repos on the web between cards. A card that hard-codes the base SHA,
+  the original line text, or an absolute commit count gets a non-fast-forward rejection.
+  Make the card `git fetch` and rebase onto `origin/<branch>`. Treat the user's web commit as
+  intentional: keep it and resolve conflicts in its favour. Write the criteria relative to
+  that head ("diff since origin/master = these files only", "origin/master is an ancestor of
+  HEAD"), not as total commit counts.
