@@ -56,6 +56,7 @@ Remove a slug from the table as soon as its result is decided another way (a CPU
 
 ## `scheduled` cards do not release themselves
 `schedule <id> "reason"` only parks the card; nothing unblocks it at the stated time. Newer Hermes builds document `schedule <id> --at <ISO8601>`; check `hermes kanban schedule --help` first. Otherwise register one no-agent cron per workstream holding a `CARDS = [(id, release_time, condition)]` table that unblocks a still-`scheduled` card once its time and condition hold. To gate on "Hermes was updated", read the commit from `~/.hermes/hermes-agent/.git/HEAD` (+ `refs/heads/<branch>` or `packed-refs`) instead of calling git: the install is a partial clone where `git show`/`log` can take minutes. Leave verification cards that need a human-confirmed precondition out of the table and release them by hand.
+**User says "hold / 보류" on a queued card:** `schedule <id> "보류(사용자 결정 …). <reason>. SCHEDULED_UNTIL 없음 → 재개는 사용자 지시로만"`. It works from `todo`, a reason without `SCHEDULED_UNTIL=` is skipped by the wake script, and it does not add a block toward triage. Then check `show` for children that were chained only behind the parked card, and relink them to the card that now runs before them, or they stay in `todo` indefinitely.
 Writing or editing that cron script is still a file edit: hand it to coder-bot as a small card (exact script content + `hermes cron create` line + a dry-run showing "nothing to release") rather than writing it yourself — the role split covers helper scripts under the profile's `scripts/` too, and the user notices when it is skipped.
 
 ## Parking an INTERIM card while a long box chain runs
@@ -86,6 +87,12 @@ Repeated block/park cycles route a card to `triage`. Within a minute the auto-de
 To avoid it, park long waits with `schedule` from the start and let one release cron do the single hand-off. Do not block the same card again for each wait.
 - **Children that redo a spend-gated stage are a budget risk.** If a child re-runs paid API calls or bypasses a gate that stopped the root (for example, a pilot gate), block or reclaim it at once. A `todo` child refuses `block`, so archive it.
 - **If the root's design has to change anyway** (a gate failed and a new spec is needed), skip the unlink/reassign dance. Archive the root and all its children, open one fresh card with the new spec, and add a comment saying "do not auto-decompose; finish in this card".
+- **If only a small tail of the root is left** (most checks done, one build/fix remaining), use the same archive route, with a continuation card:
+  - Its body points at the old card's body and comments as the spec, and lists only the remaining items.
+  - It keeps any session handle tied to the old id (for example `cc_run --task <old id>`) so the implementer's context continues.
+  - It says "never `block`; comment and `schedule('WAIT=reviewer …')` instead".
+  - Insert it into the chain with link-then-unlink, then archive the old card.
+  - Give the root-cause answer in the card itself. Granting permission alone just produces the next block.
 
 ## Worker blocked with `needs_input` on a contradiction in your own spec
 A worker may block before push because two spec items cannot both hold (for example "cells

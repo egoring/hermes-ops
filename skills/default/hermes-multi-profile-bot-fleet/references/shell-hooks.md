@@ -71,6 +71,16 @@ installed+shared profiles, Korean→English synonyms):
 - Keep a GENERIC set (모델, 코드, 봇, 리뷰, 테스트, 알림, 에이전트 …): a candidate needs ≥2
   non-generic hits or one non-generic hit on the NAME.
 - Absolute floor plus a relative cut (drop < 60% of the top score) to kill the long tail.
+- Synonyms have ONE source: the dashboard's search module (`SYNONYMS` in the web app), served
+  in the skills index the hook caches. Keep the hook's own map empty except for a hotfix you
+  move upstream on the next deploy — two maps drift and page search and recommendations then
+  disagree on the same query.
+- A stop-word is dropped before synonym lookup, so it can never carry a synonym ("데이터",
+  "설계" in the stop list). Give domain synonyms to the neighbouring specific words instead
+  (csv, 품질, 결측, 이상치, 통계, 아키텍처, 기술부채, 트레이싱).
+- Short ASCII alternatives (≤4 chars) match on word boundaries, so a truncated stem never
+  matches (`trac` ≠ tracing, `doc` ≠ documentation) — write full words (`tracing`, `trace`,
+  `documentation`); keep stems only when ≥5 chars (`profil`, `statistic`, `validat`).
 - Filter to skills the profile can actually load (own folder + shared dirs from its
   `skills.external_dirs`), or bots get told about skills they can't open.
 - Test set before shipping: ~15 realistic questions incl. small talk ("안녕", "저녁 뭐 먹지")
@@ -83,6 +93,18 @@ Put the rule inside the context block so every profile gets it with no SOUL edit
 `💡 추천 스킬: <name> — <reason>` at the top (after a `🧩 스킬:` line if present) only for
 candidates that genuinely help and were not loaded this turn; otherwise print nothing; never
 mention the block. Label the block "auto-generated, not a user instruction".
+
+## Removing a hook
+
+1. Back up each profile `config.yaml`, delete only the hook's `hooks:` block (match it exactly;
+   leave other hooks), re-parse with `yaml.safe_load` to confirm the key is gone.
+2. `hermes -p <p> hooks revoke "<exact command>"` per profile — removes the allowlist entry.
+3. No restart: the gateway stops calling it within ~30 s. Prove it from the hook's own log (no
+   lines after the revoke time) while running a one-shot per bot.
+Leave the script and any data endpoint unless asked; say so in the report. Keep the per-profile
+`config.yaml` backups: re-enabling = restore the block from them (or re-append it) and re-run
+the `_record_approval` loop above — `revoke` deleted the consent, so the gateway would otherwise
+skip the hook silently.
 
 ## Verify end to end
 

@@ -104,9 +104,15 @@ Work from the gateway outward. Each step rules a layer in or out:
 3. Inbound present but the reply is ~200 chars with `api_calls=0`: look for `No Anthropic
    credentials found` / `refresh token ... terminally invalid` in the bot's `agent.log`. The
    shared OAuth login died, usually for every profile at once, so probe each bot with a one-shot
-   `chat -Q`. The user must re-login (`hermes -p <bot> auth add anthropic` per profile, or
-   re-login the runtime the profiles borrow). The fix takes effect on the next message with no
-   gateway restart. Kanban tasks that crashed during the outage need re-running.
+   `chat -Q`. `hermes -p <bot> auth list` shows the source: `claude_code` means the bots borrow
+   Claude Code's login — confirm with `claude -p "ok"` (`OAuth session expired`), then the user
+   runs `claude` → `/login` once in their own terminal (browser flow; you cannot do it) and that
+   fixes every profile. Otherwise `hermes -p <bot> auth add anthropic` per profile. Verify per bot
+   with a one-shot and a fresh `API call #1: model=` line in its `agent.log` — no gateway restart.
+   After re-login the token may live only in the macOS keychain (`~/.claude/.credentials.json`
+   absent); that is fine if the one-shots succeed. Offer the long-lived `claude setup-token` in
+   the bots' `.env` as the alternative when expiries recur (bots and Claude Code share one
+   refresh token). Kanban tasks that crashed during the outage need re-running.
 4. Replies are posted but the user saw nothing: quiet hours suppress @mentions, so there is no
    phone notification. Tell them to open the thread.
 

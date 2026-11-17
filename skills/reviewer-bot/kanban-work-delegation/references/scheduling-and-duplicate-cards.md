@@ -8,6 +8,11 @@
   2. `unblock` the card (only when no worker is running).
   3. The next worker queries the status once and re-schedules with the corrected time.
 
+## Holding a card the user paused ("the GPU is busy, I'll tell you")
+- When the user pauses a card whose worker already parked it with a `SCHEDULED_UNTIL=` retry, the auto-wake will still fire it. Re-park it without the marker. `schedule` refuses an already-`scheduled` card, so run both steps in one shell command while no worker is live: `hermes kanban --board <b> unblock <id> && hermes kanban --board <b> schedule <id> "<user hold reason, no SCHEDULED_UNTIL>"`. Run separately, the card sits in `ready` long enough for the dispatcher to claim it and push.
+- Put the resume rule in the reason: the reviewer unblocks on the user's word, and any external rejection caused by the user's own use (e.g. a session-limit refusal) resets the card's retry count.
+- Verify afterwards: `runs <id>` shows no new worker, `kanban_wake.py --dry-run` does not list the card, and the external resource is untouched (e.g. `platform-cli kernels status` → not found / no new version).
+
 ## Never block a card that is only waiting
 - A `block` on a long external wait (TPU queue, the remote platform scoring) can loop into `block_loop_detected` and **auto-decomposition**.
 - One such decomposition produced six child cards, one of them "push kernel exactly once". That child would have made a second, unapproved external push.
@@ -15,10 +20,17 @@
   - Keep scheduling until a hard deadline, e.g. push+48h.
   - At the deadline, leave only a comment.
   - Never split the card into subtasks.
+- A card that blocks twice for real spec questions trips the same detector (limit 2) even though nothing is waiting. When you answer the first block, answer every question the worker will predictably hit next (tool/permission allowances, sibling hard-coded values, file-count expectations), not only the one it raised.
 - If decomposition has already happened:
   1. Confirm the children have no `worker_pid`.
-  2. Archive all the children immediately.
-  3. Check git status for anything a child already ran.
+  2. `hermes kanban unlink <child> <root>` for each child: the decomposer makes the children parents of the root, so the root stays `todo` behind them.
+  3. Archive all the children immediately. The root then returns to `ready` by itself, so `unblock` is not needed (it answers "not blocked").
+  4. Put the decisions for the original block reasons in one comment on the root, so the next run continues as a single card.
+  5. Check git status (or the file baseline) for anything a child already ran.
+
+## Completion watchers (background poll loops)
+- Stop an old watcher by its pid (`kill <pid>` from the start response). Never use `pkill -f '<card ids>'` from inside the new watcher command. The pattern also matches the new shell's own command line, so the new watcher kills itself and no completion notice ever arrives.
+- After any block, unblock or relink, restart the watcher with the current card list. A watcher that exited on a block, or whose list lacks newly inserted cards, stays silent.
 
 ## Re-ordering a queue: link the new parent before unlinking the old
 - To move a queued child behind a different card, run `hermes kanban link <new_parent> <child>` **first**, then `unlink <old_parent> <child>`.

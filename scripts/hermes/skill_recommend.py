@@ -36,8 +36,9 @@ MIN_SCORE = 10             # 후보 최소 점수
 REL_CUTOFF = 0.6           # 1등 점수의 60% 미만 후보는 버린다 (꼬리 잡음 제거)
 TOP_N = 3
 ALLOWED_PLATFORMS = {"discord", "desktop", "cli", "tui", "api_server", ""}  # "" = 플랫폼 정보 없는 대화형 세션
-SKIP_PREFIXES = ("[IMPORTANT: Background process", "[ASYNC DELEGATION", "[INTERNAL NOTIFICATION",
-                 "[CONTEXT COMPACTION", "/", "# Kanban task")
+SKIP_PREFIXES = ("[IMPORTANT", "[ASYNC DELEGATION", "[INTERNAL NOTIFICATION", "[System:",
+                 "[CONTEXT COMPACTION", "/", "# Kanban task",
+                 "[kanban]")  # 디스코드로 들어오는 kanban 자동 알림 (11-16: 후보 턴의 40%가 이것이었다)
 
 FIELDS = (("name", 10), ("ko", 6), ("key_points", 4), ("description", 3))
 # 한국어 조사·어미 (긴 것부터 떼어낸다)
@@ -48,12 +49,27 @@ STOP = set("지금 이거 그거 저거 그냥 좀 혹시 어떻게 뭐야 뭐�
            "방법 기능 하나 우리 너 나 내 제 있는 없는 되는 되나 돼 수 것 거 때 및 또 그리고 근데 아니 응 네 예 "
            "에서 에게 한테 파일 확인 상태 정리 요약 내용 결과 문제 사용 작업 해결 처리 추가 수정 변경 설명 "
            "오늘 내일 시간 메시지 데이터 정보 목록 전체 부분 이유 원인 다음 먼저 바로 "
-           "진행 추천 준비 설계 의견 일단 계획 검토 대로 해보자 까지만 "
+           "진행 추천 준비 설계 의견 일단 계획 검토 대로 해보자 까지만 점검 순서 알려 받은 처음 같이 잡아 붙이려면 "
            "the a an to of and or for in on is are be it this that with how what can do please".split())
 # 단독으로는 추천 근거가 약한 단어 (이 단어 하나만 맞으면 이름에 걸려도 후보로 안 친다)
 GENERIC = set("모델 코드 테스트 로그 검색 서버 설정 봇 리뷰 웹 이미지 문서 노트 스킬 프롬프트 메모리 학습 평가 배포 "
-              "알림 영상 에이전트 구조 개선 방향 함수 "
+              "알림 영상 에이전트 구조 개선 방향 함수 설계 대회 "
+              "ai md claude sonnet opus gpt api cli "
               "model code test log search server config bot review web image skill prompt agent".split())
+
+
+# 훅 자체 동의어 (hermes-hub 색인의 synonyms 에 더해진다)
+LOCAL_SYN: dict[str, list[str]] = {
+    # 비워 둔다: 동의어 원본은 hermes-hub apps/web/src/lib/skill-search.ts SYNONYMS (11-11 통일).
+    # 배포 전에 급히 고쳐야 할 때만 여기 넣고, 다음 배포 때 hub로 옮긴다.
+}
+
+
+def is_generic(t: str) -> bool:
+    """흔한 단어인가. 한국어는 조사·어미가 붙은 형태(테스트할수있게, 설계먼저)도 앞부분으로 잡는다."""
+    if t in GENERIC:
+        return True
+    return bool(re.match(r"[가-힣]", t)) and any(re.match(r"[가-힣]", g) and t.startswith(g) for g in GENERIC)
 
 
 # ---------- 색인 ----------
@@ -163,8 +179,11 @@ def shared_names(profile: str) -> set[str]:
 
 
 # ---------- 점수 ----------
-def score_all(index: dict, text: str, profile: str) -> list[dict]:
-    syn = index.get("synonyms") or {}
+def score_all(index: dict, text: str, profile: str, strict: bool = False) -> list[dict]:
+    """strict=True (대화 중간 턴): 구체적인 단어가 스킬 이름에 직접 맞은 후보만."""
+    syn = {**(index.get("synonyms") or {})}
+    for k, v in LOCAL_SYN.items():
+        syn[k] = list(dict.fromkeys([*syn.get(k, []), *v]))
     ts = tokens(text)
     shared = shared_names(profile)
     out = []
@@ -177,16 +196,23 @@ def score_all(index: dict, text: str, profile: str) -> list[dict]:
             "key_points": " ".join(s.get("key_points") or []).lower(),
             "description": (s.get("description") or "").lower(),
         }
-        total, hits, strong = 0, [], False
+        total, hits, strong, anchor = 0, [], False, False
         for t in ts:
             alts = alternatives(t, syn)
             w = max((wt for f, wt in FIELDS if any(contains(fields[f], a) for a in alts)), default=0)
             if w:
                 total += w + (10 if s["name"].lower() == t else 0)
                 hits.append(t)
-                strong = strong or (w == 10 and t not in GENERIC)  # 구체적인 단어가 이름에 맞음
+                strong = strong or (w == 10 and not is_generic(t))  # 구체적인 단어가 이름에 맞음
+                # 이름·영문 설명에 맞은 단어 (한국어 요약은 자동 생성이라 흔한 단어가 잘 걸린다)
+                anchor = anchor or any(contains(fields[f], a) for f in ("name", "description") for a in alts)
+        # 한국어 요약에만 맞았으면 근거가 약하다: 구체적인 단어 3개 이상 + 점수 18 이상일 때만 (11-16 디스코드 실측 보정)
+        if not anchor and (len([t for t in hits if not is_generic(t)]) < 3 or total < 18):
+            continue
         # 구체적인(GENERIC 아닌) 단어 2개 이상이 맞거나, 구체적인 단어 하나가 이름에 맞아야 후보
-        specific = [t for t in hits if t not in GENERIC]
+        specific = [t for t in hits if not is_generic(t)]
+        if strict and not strong:
+            continue
         if total >= MIN_SCORE and (len(specific) >= 2 or strong):
             out.append({"name": s["name"], "score": total, "hits": hits,
                         "why": (s.get("summary") or s.get("description") or "")[:80], "usage": s.get("usage_30d", 0)})
@@ -245,11 +271,21 @@ def main() -> int:
     if len(text) < 6 or text.startswith(SKIP_PREFIXES):
         log(f"skip short/system platform={platform} profile={profile}")
         return 0
+    if extra.get("kanban_task_id"):
+        log(f"skip kanban worker platform={platform} profile={profile}")
+        return 0
+    # 첫 턴은 넓게, 대화 중간은 짧은 질문 + 스킬 이름에 직접 맞는 단어가 있을 때만 (11-16 디스코드 실측:
+    # 긴 작업 지시문에서 흔한 한국어 단어로 엉뚱한 후보가 붙고, 모델은 이미 관련 스킬을 로드한 상태가 많았다)
+    first = extra.get("is_first_turn")
+    first = True if first is None else bool(first)
+    if not first and len(text) > 150:
+        log(f"skip long mid-thread platform={platform} profile={profile} len={len(text)}")
+        return 0
     index = load_index()
     if not index:
         log(f"no index platform={platform} profile={profile}")
         return 0
-    cands = score_all(index, text, profile)[:TOP_N]
+    cands = score_all(index, text, profile, strict=not first)[:TOP_N]
     ms = round((time.perf_counter() - t0) * 1000)
     log(f"platform={platform} profile={profile} {ms}ms cands={[(c['name'], c['score']) for c in cands]}")
     if cands:

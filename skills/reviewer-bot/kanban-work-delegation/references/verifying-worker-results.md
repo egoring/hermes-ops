@@ -235,6 +235,18 @@ feature type passes the discovery set and fails every family it cannot see. A fa
 validation is a valid result: the card ships no tool, and the user decides whether to
 override.
 
+## Reproducing from the README alone
+
+When the user asks "can someone reproduce this from the README", run it yourself from a clean copy, with the commands read out of the README rather than retyped:
+
+1. `rsync` the project to scratch, excluding everything a recipient would not get: `.venv`, `node_modules`, `.next`, `__pycache__`, `*.pyc`, generated DBs, recorder logs. Record the original-data hash before and after.
+2. Strip AI keys and backend env vars, and put a PATH without the AI CLI first, so the run takes the documented fallback path.
+3. Parse the README's ```sh blocks by section heading and run each block in one bash process line by line, echoing `$ cmd` and `[exit n]` per line (a `cd` or `source activate` carries to the next line only inside the block, so re-apply the venv to PATH between blocks). Use `scripts/readme_repro.py`.
+4. Byte-compare the run's outputs with the committed evidence (state summaries, event/task dumps). Then run the test suite even if the README does not mention it. Fixtures that no documented command creates show up only here, and a packaged zip without them fails the recipient's test run.
+5. List every step you needed that the README lacks. Route the README fix to the worker with exact wording, then re-run from a fresh copy and attach the full output and the README diff. The pre-fix copy's README is the "before" side of the diff.
+
+Run read-only verification scripts (version/hash calculators) in such a copy too, not in the live tree. Even a script you believe only prints breaks the "verify in a copy" rule, and you have to confess it in the role audit.
+
 ## Re-pointing your own probe at a new artifact
 
 To re-run an earlier probe (leak check, edge probe) against a fixed version, edit its input-path constant and **print that constant line before reading the output**. A `sed` pattern that does not match the exact path text leaves the old path in place. The probe then re-reads the old artifact and "finds the bug still there", or worse, passes on stale input. Also confirm that the input's sha or size equals the new artifact.

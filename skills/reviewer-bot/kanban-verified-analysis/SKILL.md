@@ -159,6 +159,18 @@ Corollary for your own reviews: when a later round exposes something an earlier 
 through, record that in the feedback. "I passed this without checking" keeps the defect count
 honest and stops the loop being read as the worker alone degrading.
 
+## Verifying an implementation chain before calling it complete
+
+Approved cards add up to a working system only if the path the user will demo actually uses them. Run this pass yourself before the final report, in a scratch copy that includes the raw data and never in the project:
+
+1. Run the project's check suite once. Then re-run every scenario from reset **twice** with your own harness, not the worker's verify script. Dump state with wall-clock columns excluded, and compare the sha of run 1 vs run 2.
+2. Replay: load only the event log into a fresh DB, rebuild, and compare the state to the original.
+3. Audit invariants with grep and with a query over the event logs: who emits the decision events (actor/channel), where the guarded states are written, and whether any result is dated before its cause. Date reversals pass every replay and determinism check, so they need their own query.
+4. Feed every mock or user-facing input file (replies, corrections, votes) into the **standard** scenario DBs through the real CLI on copies. Then count each event type per run. A file can pass its own checker while being bound to state that only the checker creates, such as a plan version that exists only in the checker's flow. In that case the demo never shows the behaviour the user asked for, and no unit test notices.
+5. Report a check → measured result table, plus every gap as 🔴/🟡, with the fix card already linked ahead of the remaining chain.
+
+Treat a dispatched review's "approved, but checklist item N unmet" as **not done**. Route it to a decision or a fix card before anything downstream runs. When a review hands something to the user as "user decision", check whether it is really a defect (a data error, causal order, a value that contradicts the design spec). Reclassify defects as fixes, and only bring real trade-offs to the user.
+
 ## Correlation is not an intervention (the main failure mode)
 
 Four consecutive targets failed because a strong *observed* difference was treated as a
@@ -298,6 +310,7 @@ Card rules for tiers 2–3:
 - When a decision lands on a card that is in `blocked` (the user picks an option),
   comment the decision first and then `unblock`. Unblocking first lets the dispatcher spawn
   a worker that reads the old comments and blocks again.
+- **Run cards in parallel only when their write sets are disjoint.** The serial chain is just your `link` order; the dispatcher has no per-assignee limit. A card that only creates new files (data sets, check scripts) can run beside an engine card, provided it does not touch the shared modules, the build/check config or the live DBs, and it defers checks that need the unfinished feature to a later card. Keep cards that edit the same core modules serial, because two coding sessions on one file lose edits. Expect side effects anyway, such as a new script tripping a repo-wide guard test, and re-run the full suite after the parallel batch lands.
 - `--board` is not a global flag; switch with `hermes kanban boards switch <slug>`.
 - **Wake crons for long queues must key on a sentinel line, not on process absence.** A
   `pgrep -f` pattern also matches the next job's process (a shared script name), so the

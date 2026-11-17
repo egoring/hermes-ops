@@ -190,4 +190,17 @@ python3 ~/.hermes/hooks/skill_recommend.py --explain "질문" --profile <프로�
 - 새 프로필에 훅을 붙일 때: `config.yaml`에 `hooks.pre_llm_call` 추가 → allowlist 등록(무인 게이트웨이는 동의 프롬프트를 띄우지 않고 훅을 건너뛴다). `hermes --accept-hooks ... hooks test`는 동의를 **기록하지 않는다** — `agent.shell_hooks._record_approval(event, command)`를 그 프로필 `HERMES_HOME`으로 호출해 기록했다.
 - 훅 명령 문자열을 바꾸면 allowlist 키도 바뀌어 다시 등록해야 한다.
 - 끄기: 프로필 `config.yaml`의 `hooks:` 블록 삭제 또는 `hermes -p <프로필> hooks revoke "<command>"`.
-- 추천이 엉뚱하면 `--explain`으로 걸린 단어를 보고 훅의 `STOP`/`GENERIC` 목록이나 hermes-hub `skill-search.ts` 동의어를 고친다.
+- 추천이 엉뚱하면 `--explain`으로 걸린 단어를 보고 훅의 `STOP`/`GENERIC` 목록이나 hermes-hub `skill-search.ts` 동의어를 고친다. 고친 뒤 `python3 ~/.hermes/hooks/skill_recommend_eval.py`로 회귀 통과 + 실제 턴 재생 결과를 확인한다(손으로 고른 질문만 보면 실제 디스코드에서 효과가 없을 수 있다 — 11-11~16 실측: 사람 질문 84건 중 💡 0건).
+- 효과 측정: 주입 문맥은 `messages`에 저장되지 않는다. "후보 스킬을 그 턴에 `skill_view` 했는가"로 본다.
+- 1회성 실행(`hermes chat -q -Q`)은 스킬 프롬프트가 "아는 일엔 로드하지 말라"로 바뀐다. 자동 로드 테스트는 대화형 모드로 한다.
+
+### 큐레이터가 기본 내장 스킬을 보관할 때
+
+30일 안 쓴 스킬은 기본 내장이라도 `.archive/`로 옮겨진다(11-07 55개, 11-14 7개). `curator pin`은 내장 스킬을 거부하므로 **restore 후 lock**:
+
+```bash
+hermes curator restore <이름> && hermes curator lock <이름>   # lock된 스킬은 자동 전이에서 빠진다
+ls ~/.hermes/skills/.archive/                                 # 며칠 뒤 다시 확인
+```
+
+lock하면 에이전트가 그 스킬을 고치지 못한다(읽기·자동 로드는 됨). 같은 이름 카테고리 폴더와 겹치면 restore가 실패한다 → 원래 경로로 직접 `mv`.

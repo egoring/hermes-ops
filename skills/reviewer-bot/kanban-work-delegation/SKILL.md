@@ -10,18 +10,15 @@ metadata:
 
 # Delegating work through a Hermes kanban board
 
-For orchestrator/reviewer profiles that create cards, steer workers, and accept or
-reject their output. Worker profiles execute; the orchestrator designs, instructs,
-and verifies.
+For orchestrator/reviewer profiles: workers execute; the orchestrator designs, instructs, steers and verifies.
 
 ## Role boundary (always on)
 
-**The orchestrator does not write or edit the files the worker was assigned.** Analysis,
-design, card authoring, and verification only. Reading files, running read-only commands,
-and recomputing numbers are all in scope; `cp`, edits, reverts, and writes to the
-workspace are not.
+Watchers and role-audit recipe: `references/monitoring-and-audit.md`.
 
-Running the worker's benchmark or analysis script yourself is verification, not authorship — do it. Routing: `references/card-inputs-and-routing.md`; protected/triage: `references/protected-files-and-triage.md`; waits/duplicates/queue re-ordering (SCHEDULED_UNTIL format, block→auto-decomposition, design-card duplicates, **link the new parent before unlinking the old** — the reverse order flips the child to `ready` and lets the dispatcher start it): `references/scheduling-and-duplicate-cards.md`.
+**The orchestrator does not write or edit the files the worker was assigned.** Analysis, design, card authoring and verification only; reading, read-only commands and recomputing are in scope, while `cp`, edits, reverts and workspace writes are not.
+
+Running the worker's benchmark or analysis script yourself is verification, not authorship — do it. **Protected files (AGENTS.md, SOUL.md) are written only with `patch`/`write_file`, never with `open(...).write` in `execute_code`.** The Python path skips the per-write approval, so the user loses the final check on the exact text even when they approved the change in chat. Routing: `references/card-inputs-and-routing.md`; protected/triage: `references/protected-files-and-triage.md`; waits/duplicates/queue re-ordering (SCHEDULED_UNTIL format, block→auto-decomposition, design-card duplicates, **link the new parent before unlinking the old** — the reverse order flips the child to `ready` and lets the dispatcher start it): `references/scheduling-and-duplicate-cards.md`.
 
 The line is **not** simply "mutating the workspace". Recomputing a stated result is yours;
 **mechanical exploratory search is the worker's even when it is entirely read-only.** Probing

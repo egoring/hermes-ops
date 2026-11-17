@@ -32,6 +32,7 @@ SCRIPTS = [
     ("hermes/kanban_wake.py", "scripts/kanban_wake.py"),        # SCHEDULED_UNTIL 카드 깨우기 (cron, 15분)
     ("hermes/_notify.py", "scripts/_notify.py"),                # kanban_wake 의 Discord 알림 모듈
     ("hermes/skill_recommend.py", "hooks/skill_recommend.py"),  # 스킬 추천 pre_llm_call 훅
+    ("hermes/skill_recommend_eval.py", "hooks/skill_recommend_eval.py"),  # 추천 회귀 + 실제 턴 재생 평가
 ]
 SCRIPT_DEST = REPO / "scripts"
 

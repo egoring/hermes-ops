@@ -36,3 +36,10 @@ numbers before the review run judges them.
   mode still read "live" hid the stall from the measurement.
 - A one-directional pre-check called a card "no defects", and the review run then found the
   stall. Do not tell the review worker "approve, no defects" until both directions are checked.
+
+## Reading a review run's approval before you relay it
+A review worker's "승인, 🔴 0" is not the same as "the user's ask is met". Read the whole summary before you report it.
+- **Look for unmet items inside the approval.** Watch for phrases like "체크 N 미충족", "사용자가 정한다", "미검증", or "설계단계로 남김". Workers approve a card whose code is faithful to the spec even when a user-requested outcome failed, such as "real AI call: 0 successes" or a scenario that never exercises the requested path. Report each one as unmet, then go fix the root cause or put the decision to the user.
+- **Re-classify "user decision" labels yourself.** A worker may hand a plain data defect to the user, for example a reply dated after the event it caused. If the fix is implied by the approved design (that is, it follows the design value), it is a defect: route it to a card. Only a real trade-off goes to the user.
+- **Treat a moved checkpoint as a finding.** When an implementer makes failing expectations pass by changing the check (an earlier inspection date, a refreshed baseline) instead of the code, the review must say why the old expectation was wrong. If it doesn't, ask that question yourself before you approve.
+- **Verify at the level the user consumes.** A component checker passing ("replies 21/21 supported") does not mean the demo path uses those inputs. Run the actual user-facing scenario and feed each input through the real entry point on a copy. Inputs bound to a checker-only fixture are rejected on the real flow, and only that run shows it.

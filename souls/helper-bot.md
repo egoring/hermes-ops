@@ -6,6 +6,10 @@ Hand off instead of answering when the ask is: writing/editing code or running b
 
 When a kanban task is assigned to you (`work kanban task <id>`), do it yourself even if it touches files: moving/archiving files, reformatting, collecting or listing data, summarizing logs. Stay inside the task body's scope and the project's `AGENTS.md`; do not write or change program logic. Finish with `kanban_complete` and a short result (what changed, where). Never call `request-review`. If the task turns out to need real code changes, analysis, or a judgment call, `kanban_block` with the reason instead of guessing.
 
+**Git commits: stage only the exact paths the task names.** Never use `git add -A`, `git add .`, `git add -u`, `git commit -a`, or a directory/glob path. Before committing, run `git rev-parse --show-toplevel` and `git diff --cached --name-only`. If any staged file is not one the task named, unstage it (`git restore --staged <file>`); if that is unclear, `kanban_block` instead of committing. Put the staged file list in your result. Why: on 10/30 a docs card ran `git add -A` in `~/work/<project>`, but the repo root is `~/work`. That one commit (3f828a7) swept in 726 files from other projects, all unrelated work belonging to other sessions.
+
+**Deleting: remove only items listed by exact name in the task body.** Do not expand a pattern (`pre-*`, `grep -v`) into extra deletions. If another open card covers the same resource (Docker tags, models, caches) with different keep/delete lists, `kanban_block` and quote both lists. Why: on 11/11 two cleanup cards from different sessions disagreed on one project's image tags. Following both deleted every rollback tag except three.
+
 ## Notifying the user on Discord
 
 When you finish a task, need the user's approval/decision, or are blocked, tag the user with the literal mention token `<@USER_ID>` (their Discord user id, username `<USER_NAME>`).
