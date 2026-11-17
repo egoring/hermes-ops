@@ -94,6 +94,33 @@ drop). Order:
    preceding timestamped line before calling it new.
 6. Update the ops issues table, memory, and any upstream issue (comment with before/after numbers,
    then close).
+7. Count active skills before and after (`find ~/.hermes/skills -name SKILL.md -not -path
+   '*/.archive/*' | wc -l`) — see below.
+
+## Skills vanished ("플러그인이 빠졌다", a big "No longer available" list)
+
+Usually the curator, not the user's last action. Prove the cause before blaming a recent step
+(a keychain/credential change does not remove skills or Claude Code plugins):
+1. `ls ~/.hermes/skills/.archive` + `stat -f '%Sm' -t '%m-%d %H:%M' .archive/*` grouped by time,
+   and `grep 'curator: auto: .* archived' ~/.hermes/logs/gateway.log` — a batch with one
+   timestamp is the 30-day-unused auto-archive. Archives are recoverable, never deleted.
+2. Separately confirm Claude Code side if the user mentions plugins: `claude plugin list`. Its
+   "Synced from claude.ai" block vanishes while logged out (e.g. after deleting the
+   `Claude Code-credentials` keychain item) and returns after `/login` — not a loss. A synced
+   plugin with the same name as a local one is ignored; silence it with
+   `claude plugin disable <name>@synced`. `plugins/.trash/` holding only old versions of one
+   plugin is update leftovers.
+3. Restore a chosen subset, not everything (each restored skill costs index tokens every turn):
+   `hermes curator restore <name>`. Before restoring, check whether a newer bundled skill
+   replaced it (e.g. one office skill covering docx/xlsx/pptx) and skip the duplicates.
+4. `restore` fails with `destination already exists` when a CATEGORY folder has the skill's
+   name (`skills/github/` holding `github-*`); `mv .archive/<name>` to its original category
+   path by hand (e.g. `software-development/<name>`) and confirm with `skills list`.
+5. `hermes curator pin` refuses bundled/hub skills — they are exempt from auto-archive anyway,
+   so report that instead of retrying. Pin only agent-created skills you want kept.
+Shared-skill links (`~/.hermes/shared-skills`) point at default originals; if the curator archives
+an original, the bots silently lose it — re-check `skills list | grep -c external` after an
+archive batch.
 
 ## Keeping SOUL.md project-agnostic / switching projects
 
@@ -377,6 +404,25 @@ move the original text into the body as a comment, so the activation criteria ar
 After installing into Hermes, confirm it registered with `skills_list` rather than trusting the
 file copy — a frontmatter the loader rejects leaves the files on disk but the skill absent.
 
+Bringing Claude Code plugin content into Hermes ("claude code 안에 있는거 넣어줘"):
+1. Inventory every plugin — local (`installed_plugins.json` → `installPath`) AND account-synced
+   (`~/.claude/plugins/synced/<bucket>/<plugin>`) — counting skills, commands, agents, hooks,
+   MCP servers. Only `skills/*/SKILL.md` transfers; commands/agents/hooks are Claude Code formats,
+   and hook-driven plugins (memory, context compressors) don't run in Hermes. Most MCP servers
+   need SaaS accounts — skip unless asked.
+2. Propose a subset tied to the user's work (typically engineering + data skills), dropping
+   ones that duplicate an existing Hermes skill; never import everything (~200 skills = index
+   tokens every turn). Ask once with the list.
+3. Check name clashes across default, every bot folder, and shared-skills before copying.
+4. Copy (not link — plugin updates rewrite the cache) to `~/.hermes/skills/claude-plugins/<name>`,
+   rewrite `description` to ≤60 chars with a "Use when …" trigger, keep the original as an HTML
+   comment, and add a one-line note where the body uses `~~category` connector placeholders
+   ("use the matching Hermes skill/CLI"). Claude-only frontmatter keys (`user-invocable`,
+   `allowed-tools`) are ignored by Hermes — leave them.
+5. `hermes curator pin <name>` each (unmanaged local skills accept it), link the bot-relevant
+   subset into `shared-skills`, then verify per bot as in Sharing skills across profiles.
+Tell the user the copies don't follow plugin updates.
+
 ## Sharing skills across profiles
 
 A skill installed in the default profile is invisible to bot profiles. Don't copy it per
@@ -415,6 +461,41 @@ Recommending skills per question ("질문마다 스킬 추천") is the opposite 
 plumbing: a `pre_llm_call` shell hook picks candidates, the model decides whether to show a
 `💡 추천 스킬:` line (only when relevant and not already loaded). Recipe, consent registration
 for headless gateways, and precision rules in `references/shell-hooks.md`.
+
+Judge such a hook on real Discord traffic, not hand-picked questions: replay the logged turns
+against `state.db` text (`~/.hermes/hooks/skill_recommend_eval.py`). A week of real traffic showed
+40% of candidate turns were kanban notifications arriving as user messages (`[nick] [kanban] Task…`),
+and long mid-thread work instructions matched common Korean words in auto-generated summaries
+(songwriting for "ai", design-md for "설계"), so the model ignored every candidate (0 💡 in 84
+human turns). Fix that held: skip `[kanban]`/`[IMPORTANT`/`kanban_task_id` turns, recommend broadly
+only when `extra.is_first_turn`, and mid-thread only for ≤150-char messages whose specific word hits
+a skill NAME; require a name/English-description hit before Korean-summary-only matches count.
+The injected context is ephemeral (not stored in `messages`), so measure effect as "candidate
+skill was `skill_view`ed in that turn", not by searching stored text.
+
+Curator auto-archive also hits bundled skills after 30 idle days, and `curator pin` refuses them
+("bundled or hub-installed"). Use `hermes curator restore <n>` then `hermes curator lock <n>` —
+locked skills are skipped by `apply_automatic_transitions`. Re-check `.archive/` a few days later
+rather than trusting the CLI's "never touched" wording.
+wants this hook ON for every profile; it measurably turns a skipped skill into a loaded one
+(same interactive question: no `skill_view` without it, `code-review` + `github-code-review`
+loaded with it). When bots under-load skills, check the hook is registered before anything else.
+After adding or importing skills, run the hook's `--explain` with a few domain questions for
+the new skills — Korean queries often miss them until synonyms are added. The `🧩 스킬:` usage
+marker stays. Removing any injection hook: delete the `hooks:` block
+from every profile `config.yaml` (backup first), `hermes -p <p> hooks revoke "<command>"`, wait
+~30 s, confirm the hook log stops. Threads whose history already holds injected blocks or the
+model's reactions to them keep imitating them — find them with a `state.db` query on a
+distinctive phrase of the block and recommend `/new` for those threads only.
+
+## "Do the bots use plugins?"
+
+Discord bots run Hermes, so Claude Code plugins (`claude plugin list`) never apply to them —
+say so first. For Hermes: `hermes -p <bot> plugins list` (Source column: `bundled` vs
+user-installed), and actual use = counts of plugin-provided tool names (`browser_*`,
+`web_search`/`web_extract`, `vision_analyze`, `image_*`, `memory`) in that bot's
+`messages.tool_calls` over 30 days (read-only `state.db`). Report a per-bot table: total tool
+calls vs plugin-backed calls.
 
 ## Protected instruction files and approval timeouts
 
@@ -491,6 +572,18 @@ hermes -p <bot> chat -Q -t file --max-turns 6 -q "<test prompt>" 2>&1 | grep -vE
   resolves relative paths against the pinned project dir, so the bot reports "file not found".
   Always put ABSOLUTE paths in test prompts.
 - Restrict `-t` to `file` (add `terminal` only when needed) so no kanban task can be created.
+  When the test touches skills, include the `skills` toolset (`-t skills,file`) — without it
+  `skill_view` is absent and the bot falls back to reading files, which tests nothing.
+- **Never judge skill AUTO-loading from `chat -q`/`-Q`.** One-shot sessions get a lean `## Skills`
+  prompt ("load only for knowledge you lack; don't load process skills") instead of the gateway's
+  "MUST load / err on the side of loading", so they skip skills a Discord turn would load. Run the
+  interactive path in a pty and exit after the answer:
+  `(sleep 120; printf '/exit\r') | script -q /dev/null timeout 170 hermes -p <bot> chat -t skills,file -q "<question without the skill name>"`,
+  then read that session's `skill_view` calls from `state.db` (`json_each(tool_calls)`). Confirm
+  the prompt variant with `instr(p.prompt,'MUST load')` on the session's `system_prompts` row.
+  A skill that is listed and still skipped is the model's judgment (often several overlapping
+  skills for one task), not a broken install — report it that way, with the real Discord
+  load rate (discord sessions with ≥1 `skill_view` / all discord sessions, 14 days).
 - Role-split tests run safely against throwaway files in the scratch dir (a 2-line buggy
   function + a small diff): T1 "fix this" with "(no kanban tools here — describe what you would
   do in ≤5 lines)" must yield a spec + coder task plan and leave the file unchanged; T2 the
@@ -725,3 +818,10 @@ check as passed from `$?` after a pipe (`cmd | tail -5; echo rc=$?`) — that is
 command's status, so a crashed `tsc`/test run reads as rc=0; run the check unpiped, or use
 `set -o pipefail` / `${PIPESTATUS[0]}`, and read its own output for the pass line. When you were wrong
 earlier in the session, say so plainly in one line and correct it — do not quietly restate.
+
+When a delete/disable instruction could refer to more than one pending thing (a feature, a
+recommendation in your last answer, a plan item), ask which in one line before acting —
+removing the wrong one silently is worse than a one-line question.
+
+Before running an ops script just to see its options, read its argv handling: a script without
+argparse ignores `--help` and performs its full action (copy, delete, push prep).

@@ -29,3 +29,17 @@ Completion notices (kanban done, background process exit, kernel COMPLETE) arriv
 - Bot-posted alerts may not wake the agent session. The user sees them and can ping.
 
 Reference implementation: `~/.hermes/profiles/reviewer-bot/scripts/ntl_stall_watch.py`.
+
+## In-session card watcher (a chain you are actively driving)
+When the Discord session itself drives a serial chain, a tracked background watcher whose exit notifies the session works better than a cron. Write it in Python, not bash:
+```
+terminal(background=True, notify=True, command="python3 -u - <<'EOF'
+... L = [card ids]; P = {t: status(t)}   # status = line 2, field 2 of `hermes kanban --board <b> show <t>`
+loop every 60 s: if status(t) changed into done|blocked|triage|scheduled|archived -> print time, card, transition, last `runs` line; exit
+else P[t] = new status
+EOF")
+```
+- Compare per card, not counts. A count of done/blocked across the set misses one card finishing while another blocks in the same minute.
+- Avoid bash associative arrays (`declare -A`) here. Background commands may run under zsh or an older bash, and the watcher then silently never fires: a card blocked for 15 minutes with no alert.
+- Re-arm right after every notification with the current card set, adding new cards and dropping finished ones. Kill the old pid when you replace a watcher; its SIGTERM notice is expected and needs no reply.
+

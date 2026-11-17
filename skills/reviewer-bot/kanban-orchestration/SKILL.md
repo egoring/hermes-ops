@@ -12,7 +12,7 @@ metadata:
 For running work as an analysis/design profile that delegates implementation to a
 coder profile via `hermes kanban`.
 
-Stuck cards/refused transitions: `references/stuck-cards.md`. Approved handoffs that stall between turns: `references/stall-watchdog.md`. wake vs notify cost: `references/notify-token-budget.md`. fable: `references/fable-handoff.md`. Numeric gates vs spec constants/measurement resolution, both-direction checks of event results: `references/acceptance-gates.md`. Workers cannot mutate Kanban via the CLI (measurement scripts you run, temp boards, cards blocked on a user step): `references/worker-limits-and-test-boards.md`.
+Stuck cards/refused transitions: `references/stuck-cards.md`. Live queue edits (insert/reorder on a serial host, review BLOCK overlapping a follow-up, parking without auto-wake, sqlite reads of run summaries/comments, artifact-not-sentinel checks): `references/queue-and-dependency-edits.md`. Stalled handoffs: `references/stall-watchdog.md`. wake vs notify cost: `references/notify-token-budget.md`. fable: `references/fable-handoff.md`. Numeric gates: `references/acceptance-gates.md`. Workers cannot mutate Kanban via the CLI (measurement scripts you run, temp boards, cards blocked on a user step): `references/worker-limits-and-test-boards.md`. Card-body footer (scratch is pruned at 24 h; don't keep it there): `templates/card-footer-review-loop.md`.
 
 ## Role boundary
 

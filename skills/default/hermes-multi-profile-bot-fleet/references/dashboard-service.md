@@ -284,9 +284,12 @@ Rules for any separate app that reads Hermes state:
     `function.name='skill_view'`, arguments `name`, strip a `plugin:` prefix), last 30 days.
     Aggregate by NAME across all profiles — a bot often calls a skill installed only in another
     profile, so per-install counting misses it. `messages` has no timestamp index, so this is a
-    full scan: ~0.1 s warm, but several seconds on a cold page cache once bot `state.db`s reach
-    GBs (after reboot/memory pressure). Precompute it on a timer or cache it in the host reader —
-    don't compute it inside a request the api calls with a short timeout. Don't add an index to
+    full scan over multi-GB bot `state.db`s plus the shared-dir walk; it can take 8 s+ on EVERY
+    call, not only cold. Give that one endpoint its own api timeout (`_get(path,
+    _timeout=30.0)`, other endpoints keep 5 s) behind the api's ~2 min cache, or precompute it
+    on a timer — a short timeout returns 502 every time and the page plus any index consumer
+    (`/api/skills-index`) break together. After deploying anything that touches skills, curl
+    the endpoint twice and record status + time (first ~8 s, cached ~0.01 s). Don't add an index to
     the Hermes DB (read-only access rule). Typically only ~10% of installed skills are used in 30 days — worth telling the user.
   - Change history: `skills/.curator_ledger.jsonl` (ts, actor, action, skill, evidence.file_path).
   - Grouping by function ("카테고리 나눠서 보기좋게"): the folder `category` from the reader is
@@ -418,7 +421,9 @@ Rules for any separate app that reads Hermes state:
   Known causes: a board dir holding a 0-byte `kanban.db` (no `tasks` table) crashes every
   board-reading endpoint — the reader must skip DBs without `tasks`, and the stray file usually
   came from a `sqlite3` CLI call on a missing path (move it to `~/.Trash`, not `rm`); and a
-  cold-cache full scan exceeding the api's per-call timeout (see Skills page → Usage).
+  slow skills read exceeding the api's per-call timeout (see Skills page → Usage). A 0-byte
+  `~/.hermes/kanban/kanban.db` (root, not under `boards/`) is outside the readers' paths — note
+  it, don't chase it as the cause.
 - When the user says they will run it "on the PC", confirm which machine before finalizing: the
   design is host-specific (launchd, `host.docker.internal`, 127.0.0.1-only). If the cluster runs
   on a different machine than the Hermes data, the host reader must listen on the LAN and the

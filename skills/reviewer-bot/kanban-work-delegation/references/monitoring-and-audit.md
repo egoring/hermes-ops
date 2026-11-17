@@ -1,0 +1,32 @@
+# Watching cards and auditing role separation
+
+## Background card watchers
+- Write the watcher in Python (`python3 -u - <<'EOF'` with a list literal of ids). A shell loop `L="t_a t_b"; for t in $L` does not word-split under zsh, so every poll asks for one task named "t_a t_b" and the watcher prints `no such task` until its timeout — it never fires.
+- Poll `hermes kanban show <id>` line 2 for status once a minute; exit on the first transition into done/blocked/triage/scheduled/archived and print the last `runs` line. Start it with `background=true, notify=true`.
+- One watcher per active chain. When adding cards, kill the old watcher and start a new one with the full list; the SIGTERM notice of the killed one is expected — answer it in one line.
+- After a watcher fires, re-arm it for the remaining cards before replying; otherwise the next completion arrives silently.
+- Old broken shell watchers keep running for hours and later surface as walls of `no such task`. When one appears, sweep with `process_manage(action='list')` — not `ps | grep`, whose pattern misses watchers started from other shells — and `kill` every entry whose status is `running` except the current watcher, in the same turn. Then answer the notice in one line (its cards were already done).
+
+## Overnight chains (user wants it "done by morning")
+- Chain every remaining card by dependency before going quiet: create new prerequisites with `--parent`, and insert a prerequisite in front of an already-queued `todo` card with `hermes kanban link <new> <queued>` plus a spec-correction comment widening that card's allowed diff. Never edit or transition a card whose worker is running; queue the new work behind it with an extra `--parent`.
+- The final-check card can be created up front with `--parent <last impl card>`; it stays `todo` until the chain finishes. Post the routing line when you create it.
+- Use ONE watcher for the whole chain that prints intermediate `done`s and exits only on the last card or on blocked/triage/scheduled, so the overnight thread gets one wake-up instead of one per card.
+- Quiet hours suppress tags, so schedule a one-shot `cronjob_manage create` at 09:00 (Asia/Seoul, deliver to origin, toolsets terminal+file, workdir = project) with a self-contained READ-ONLY prompt: card statuses and where a stopped card stopped, artifact sha/size, final-check 🔴/🟡/🟢, test-env readiness (ports free, launcher points at the newest zip), and the user's to-do list. The cron session has no chat context, so name every card id and path in the prompt.
+
+## Parking a card on a user hold ("I'm using the GPU, I'll tell you")
+- A card whose last scheduled reason has `SCHEDULED_UNTIL=` gets auto-woken by the wake script; a scheduled card without it is left alone. To turn a timed retry into an indefinite hold, re-schedule it with a reason that has no `SCHEDULED_UNTIL=` (who holds it, why, "reviewer unblocks to resume", and that retry counters restart from 0 because the user's own session caused the rejections).
+- `hermes kanban schedule` refuses a card that is already scheduled. Run `hermes kanban unblock <id> && hermes kanban schedule <id> "<reason>"` as one command so the dispatcher has no window to claim the briefly-ready card, then confirm the last run row is the schedule, no worker process exists for the card, and the external job was not started (e.g. kernel status 404 for a never-pushed kernel).
+- Do this only when no worker is running on the card (last run not `running`); otherwise comment and let the worker transition it.
+- Resume with a comment stating the user's go-ahead and the reset counters, then `unblock`.
+
+## Reading a finished card's full result
+`hermes kanban show <id>` prints only the truncated "Latest summary"; a final-check worker may write no report file. The structured result (per-criterion verdicts, defects by severity, not-verified list, side effects) is in the run row: `sqlite3 'file:~/.hermes/kanban/boards/<board>/kanban.db?mode=ro' "select metadata from task_runs where task_id='<id>'"` (per-board DB, not `~/.hermes/kanban.db`). Re-derive the user report from that JSON, not from the summary line.
+
+## Auditing whether roles held
+Evidence comes from the profiles' own session stores, not from worker self-reports.
+1. Tool calls: open `~/.hermes/profiles/<profile>/state.db` read-only (`file:…?mode=ro`), table `messages`, `role='assistant'`, `tool_calls` JSON since the window start. Flag `write_file`/`patch` whose path is inside the project, and terminal/execute_code commands that mention the project path and contain `cp|mv|rm|rsync|sed -i|tee|>` or Python `open(…,'w')`/`write_text`, excluding commands that go through the recording wrapper (`cc_run.sh`). Then read each flagged command: copies *from* the project into scratch are verification, not authorship — judge by the destination.
+2. Which model wrote code ("another session had Haiku coding — check it"): per profile, `select model,count(*) from sessions where started_at > <window> group by model` in `state.db`, then for every session on the suspect model list its file writes (`write_file`/`patch` paths plus shell redirects, `sed -i`, `tee`, `cat >`, platform-cli push/submit). For each written file report whether it is still in use (referenced by a live cron, script import, or repo path) and, if live, test it directly instead of trusting the session; files of finished projects or since-deleted helpers are "no impact". Leftover `_`-prefixed one-off scripts are cleanup items.
+   Recorder logs: for each recorder log (`_cc_logs/*.out.json`) in the window, collect `modelUsage` keys; report counts and the files that fail to parse (a run still in progress, or a broken log).
+3. Review pairing: for each card, `show --json` events of kind `review_requested` → (implementer, reviewer) must be (coder-bot, reviewer-bot); count changes_requested rounds against the 3-round cap; count `<@…>` mentions in approval summaries when the user asked for untagged completions.
+4. Discord-session transitions: confirm each complete/unblock you made was on a card with no running worker (`runs` last line not running).
+5. Report: kept / violated (time, card, what, already corrected?) / your own deviations (e.g. running a read-only script in the live tree instead of a copy). Fix forward: put a missing rule into the per-card comment of the remaining cards, not only into a skill the worker may not load.
