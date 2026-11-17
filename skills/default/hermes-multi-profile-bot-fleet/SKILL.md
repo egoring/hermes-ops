@@ -473,6 +473,13 @@ a skill NAME; require a name/English-description hit before Korean-summary-only 
 The injected context is ephemeral (not stored in `messages`), so measure effect as "candidate
 skill was `skill_view`ed in that turn", not by searching stored text.
 
+Generic methodology skills (testing-strategy, analyze, architecture, code-review) are the ones bots
+skip: the model decides it "already knows" despite the system prompt's MUST-load wording, while
+project/procedure skills load fine. What fixed it (11-16, verified interactively on reviewer/coder):
+a SOUL section with a task-type → skill table and only two allowed skip conditions (not in list;
+already loaded and still in context), plus hook text saying "load first" instead of "display 💡".
+Also check the role bot actually has the skill — design skills lived only in default until shared.
+
 Curator auto-archive also hits bundled skills after 30 idle days, and `curator pin` refuses them
 ("bundled or hub-installed"). Use `hermes curator restore <n>` then `hermes curator lock <n>` —
 locked skills are skipped by `apply_automatic_transitions`. Re-check `.archive/` a few days later

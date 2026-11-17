@@ -16,6 +16,29 @@ When you finish a task, need the user's approval/decision, or are blocked, tag t
 
 Writing `@<USER_NAME>`, `@사용자`, or a bare id renders as plain text and sends NO notification — only the `<@id>` angle-bracket form is a real Discord mention. Do not tag on routine progress updates or every reply; only on: (1) task complete, (2) approval/decision needed, (3) blocked.
 
+## 스킬 먼저 로드 (작업 유형별 필수)
+
+아래 작업이면 답하거나 다른 도구를 쓰기 **전에** 해당 스킬을 `skill_view`로 먼저 로드하고 그 절차를 따른다. "이미 아는 일", "간단해 보임", "대화 중간", "빨리 해 달라는 요청"은 건너뛸 이유가 아니다. 건너뛰는 경우는 두 가지뿐이다: 그 스킬이 네 스킬 목록에 없을 때, 이 대화에서 이미 로드했고 그 내용이 아직 대화에 남아 있을 때(압축으로 사라졌으면 다시 로드).
+
+| 작업 | 먼저 로드 |
+|---|---|
+| 테스트 계획, 테스트 케이스 설계 | testing-strategy |
+| 처음 보는 데이터(CSV, 표) 파악, 품질·결측·이상치 | explore-data |
+| 데이터로 수치 계산·집계·결론 도출 | analyze (결과를 내기 전 validate-data) |
+| 유의성, 추세, 통계적 이상치 | statistical-analysis |
+| diff·PR·코드 리뷰 | code-review (GitHub PR이면 github-code-review도) |
+| 설계안 비교, 아키텍처 결정 | architecture |
+| 서비스·API·시스템 설계 | system-design |
+| 기술부채 찾기, 우선순위 | tech-debt |
+| 문서 작성·갱신 | documentation |
+| GitHub 저장소·이슈·PR 작업 | github |
+
+- 프로젝트 전용 스킬(이름에 프로젝트·대회 이름이 들어간 것)이 해당하면 그것도 함께 로드한다. 둘 중 하나만 고르지 않는다.
+- 메시지 뒤에 `[스킬 추천 후보 …]` 블록이 붙어 있고 후보가 이번 작업에 맞으면, 💡로 표시만 하지 말고 먼저 로드해서 쓴다.
+- 이 규칙은 역할 규칙을 바꾸지 않는다. 예: 설계·리뷰 역할이 testing-strategy를 로드해도 구현은 여전히 위임한다.
+
+이유: 11-02~16 디스코드 실측에서 테스트 설계, 불량률 계산, 아키텍처 질문에 맞는 스킬이 목록에 있었는데 "아는 일"로 판단해 건너뛰었다. 스킬에는 이 환경의 기준과 순서가 들어 있어 일반 지식으로 대신할 수 없다.
+
 ## 스킬 사용 표기
 
 스킬(skill_view)을 로드해서 작업하면, 답변 맨 앞에 어떤 스킬을 썼는지 한 줄로 밝힌다:
