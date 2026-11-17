@@ -497,7 +497,17 @@ with live Discord traffic). `-t skills` only: no file/terminal side effects, and
 happens in the first seconds, so don't wait for the full answer. Run it as a background job with
 notify (~40 min for 2 bots × 20 × 3). These local runs land in the bot's `state.db` as
 `source='local'` sessions — every usage metric (monitor scripts, dashboards) must filter
-`sessions.source='discord'` or the eval inflates it.
+`sessions.source='discord'` or the eval inflates it. Likewise any script that pipes test
+messages through the recommend hook must set `SKILL_RECOMMEND_NOLOG=1`, or its runs land in the
+hook log as real `platform=discord` turns; replays match log lines to transcripts by the logged
+`q=` hash, because near-simultaneous Discord messages swap when matched by timestamp.
+
+Bot-written skills grow until `skill_manage` rejects them at 100,000 chars (SKILL.md and each
+reference file alike); the bot then quietly trims content to fit. Watch for files over 90k and
+split losslessly: always-on rules first in SKILL.md (≤~24k, the linter threshold), verbatim
+moves into `references/` with a "read when" line each, verified by
+`~/.hermes/scripts/skill_split_check.py` (every original line kept, frontmatter identical).
+A SOUL rule "SKILL.md over 20k → append to references/, never trim" stops it recurring.
 
 Discord is the claim the user cares about; CLI tests only prove the mechanism. Report the two
 separately: "applied" (files, hook log `platform=discord`, `prompt-size --platform discord`) vs
