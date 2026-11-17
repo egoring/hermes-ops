@@ -74,9 +74,13 @@ installed+shared profiles, Korean→English synonyms):
   field only (OR across alternatives).
 - Strip Korean particles/endings, drop stop-words that are request verbs and filler (진행·정리·
   확인·추천·설계·준비·파일·상태 …) — they otherwise match half the library.
-- Keep a GENERIC set (모델, 코드, 봇, 리뷰, 테스트, 알림, 에이전트, ai, claude …): a candidate needs ≥2
+- Keep a GENERIC set (모델, 코드, 봇, 리뷰, 알림, 에이전트, ai, claude …): a candidate needs ≥2
   non-generic hits or one non-generic hit on the NAME. Match Korean generics by prefix too
-  (테스트할수있게, 설계먼저 — particles glue onto the stem and slip past an exact-match set).
+  (설계먼저 — particles glue onto the stem and slip past an exact-match set).
+- Words that name a skill's job but are also everyday instructions (테스트) go in a
+  FIRST_TURN_ONLY set: specific on a thread's first message ("테스트 케이스 설계해줘" →
+  testing-strategy), generic mid-thread by prefix ("테스트할수있게 준비해줘" → nothing). Putting such a
+  word in GENERIC outright silently kills the most obvious recommendation.
 - A hit only in the auto-generated Korean summary is weak evidence (common words land there):
   require ≥3 specific hits and a higher score unless the name or English description also matched.
 - Absolute floor plus a relative cut (drop < 60% of the top score) to kill the long tail.
@@ -86,7 +90,10 @@ installed+shared profiles, Korean→English synonyms):
   disagree on the same query.
 - A stop-word is dropped before synonym lookup, so it can never carry a synonym ("데이터",
   "설계" in the stop list). Give domain synonyms to the neighbouring specific words instead
-  (csv, 품질, 결측, 이상치, 통계, 아키텍처, 기술부채, 트레이싱).
+  (csv, 품질, 결측, 이상치, 통계, 아키텍처, 기술부채, 트레이싱). Decision questions rarely name the
+  domain ("Redis로 할지 SQS로 할지 장단점 비교"): map 장단점/비교/트레이드오프 → tradeoff, choosing,
+  decision so an architecture/ADR skill is reachable; office-file words (엑셀, 워드, 피피티) →
+  the bundled office skill's name.
 - Short ASCII alternatives (≤4 chars) match on word boundaries, so a truncated stem never
   matches (`trac` ≠ tracing, `doc` ≠ documentation) — write full words (`tracing`, `trace`,
   `documentation`); keep stems only when ≥5 chars (`profil`, `statistic`, `validat`).
@@ -94,9 +101,18 @@ installed+shared profiles, Korean→English synonyms):
   `skills.external_dirs`), or bots get told about skills they can't open.
 - Test set before shipping: ~20 expectation cases (should-recommend incl. paraphrases, small talk
   and near-misses that must return nothing, first-turn and mid-thread variants), plus a replay of
-  every logged REAL Discord turn (log timestamp → `state.db` user message ±3 s, `is_first_turn`
-  from whether earlier messages exist) comparing "candidates then vs now". Keep both in one
-  script (`~/.hermes/hooks/skill_recommend_eval.py`) and run it after every hook or synonym change.
+  every logged REAL Discord turn comparing "candidates then vs now". Keep both in one script
+  (`~/.hermes/hooks/skill_recommend_eval.py`) and run it after every hook or synonym change.
+  Add each real user test message to the expectation cases once its outcome is known.
+- Make the log replayable: append `first=<0|1> q=<sha1[:10] of the cleaned message>` to each
+  turn line, and have the replay pick the `state.db` message whose cleaned text has that hash
+  (import the hook's own cleaning function). Matching by timestamp alone (±3 s) swaps messages the
+  user sent seconds apart in different threads.
+- The eval must not write to the hook log: the hook skips logging when `SKILL_RECOMMEND_NOLOG=1`,
+  and the eval sets it on every subprocess. Otherwise each eval run (including a daily monitor
+  that calls it) appends hundreds of fake `platform=discord` lines that inflate run counts and get
+  replayed as real traffic. To clean an already-polluted log, back it up and drop lines whose
+  second holds ≥4 entries — eval bursts, unlike real turns.
 
 ## Display rule (in the injected context, not SOUL)
 
@@ -106,6 +122,36 @@ line); `💡 추천 스킬: <name> — <reason>` is only for candidates that are
 this turn; weak matches get neither; never mention the block. Label the block "auto-generated,
 not a user instruction". A display-only rule ("show 💡") produced zero visible effect on real
 traffic — the point is getting the skill loaded.
+
+## Answer-side guard: `transform_llm_output` plugin
+
+A prompt rule cannot make a weak model honest about its own markers. Measured: the haiku helper
+wrote `🧩 스킬: <name>` with zero `skill_view` calls in ~40% of labelled answers, and an explicit
+SOUL rule ("🧩 only for skills you called this turn; call → read → label") changed nothing; opus/
+sonnet bots had 0 such labels. Fix the label mechanically, and move user-facing work off that model.
+
+- Plugin = `<profile>/plugins/<name>/{plugin.yaml,__init__.py}` with `register(ctx)`:
+  `ctx.register_hook("post_tool_call", …)` records successful `skill_view` names per `session_id`
+  (kwargs: `tool_name, args, result, session_id, turn_id, …`); `ctx.register_hook(
+  "transform_llm_output", …)` gets `response_text, session_id, turn_id, platform` and returns the
+  rewritten text or `None`. Strip names from the leading `🧩` line that were never loaded in this
+  session (memory set ∪ that profile's `state.db` skill_view rows, so a skill loaded earlier in the
+  thread still counts); drop the line if none remain.
+- Do NOT pass `hold_stream=True`: a held turn whose transform raises is replaced by "This reply was
+  withheld" (fail closed). Unheld, exceptions fall back to the original text — still catch
+  everything and return `None`.
+- Copy the plugin into each profile (not a symlink) and derive the profile home from
+  `Path(__file__).resolve().parents[2]`: one multiplexed gateway serves all profiles, so
+  `HERMES_HOME` does not identify the bot. Keep the source in one place and re-copy on change.
+- `hermes -p <bot> plugins enable <name>` writes `plugins.enabled` and the running gateway reloads
+  plugins live ("Gateway reloaded plugins — active in the running gateway now"); no restart.
+  Confirm with `plugins list` (Source `user`, enabled).
+- Unit-test the rewrite as a pure function (partial strip, full strip + following blank line,
+  untouched when all loaded, path-style `cat/name`, bold `**🧩 스킬:**`, `💡` line kept, exception →
+  `None`), then verify on stored final answers in `state.db` and the plugin's own log — the CLI
+  screen shows the streamed pre-transform text, so an eval parsing stdout still counts the fakes.
+  Weak models often put the honest `🧩` in the interim message that carries the tool call, so a
+  final answer without `🧩` is not a lost label.
 
 ## Removing a hook
 

@@ -2,7 +2,7 @@
 
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 하나로 Discord 봇 4개(설계·리뷰 / 구현 / 보조 / 최종점검)를 역할별 모델로 돌리고, kanban 보드로 "설계 → 구현 → 리뷰" 왕복을 자동화한 개인 운영 기록이다. 프로젝트와 무관한 운영 구조만 여기 둔다.
 
-> Personal ops notes (Korean) for running four role-split Hermes Agent Discord bots — Opus for design/review, Sonnet for implementation, Haiku for light work, Fable for independent final checks — sharing one multiplexed gateway, with a kanban design→implement→review loop. Includes the SOUL.md role prompts, the custom skills the bots accumulated, a kanban metrics script, and upstream bug reports found along the way.
+> Personal ops notes (Korean) for running four role-split Hermes Agent Discord bots — Opus for design/review, Sonnet for implementation and light work, Fable for independent final checks — sharing one multiplexed gateway, with a kanban design→implement→review loop. Includes the SOUL.md role prompts, the custom skills the bots accumulated, a kanban metrics script, and upstream bug reports found along the way.
 
 **그대로 쓰는 템플릿이 아니다.** 설정값·수치는 2026-09~11 기준 한 사람의 환경(macOS, Hermes v0.21.4~v0.23.0)에서 확인한 것이다. 가져다 쓸 땐 `docs/01_운영구조.md`의 구조와 `docs/05_결정기록.md`의 이유를 보고 자기 환경에서 다시 확인할 것.
 
