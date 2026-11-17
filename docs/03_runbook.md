@@ -192,6 +192,8 @@ python3 ~/.hermes/hooks/skill_recommend.py --explain "질문" --profile <프로�
 - 끄기: 프로필 `config.yaml`의 `hooks:` 블록 삭제 또는 `hermes -p <프로필> hooks revoke "<command>"`.
 - 추천이 엉뚱하면 `--explain`으로 걸린 단어를 보고 훅의 `STOP`/`GENERIC` 목록이나 hermes-hub `skill-search.ts` 동의어를 고친다. 고친 뒤 `python3 ~/.hermes/hooks/skill_recommend_eval.py`로 회귀 통과 + 실제 턴 재생 결과를 확인한다(손으로 고른 질문만 보면 실제 디스코드에서 효과가 없을 수 있다 — 11-11~16 실측: 사람 질문 84건 중 💡 0건).
 - 효과 측정: 주입 문맥은 `messages`에 저장되지 않는다. "후보 스킬을 그 턴에 `skill_view` 했는가"로 본다.
+- 스킬을 자꾸 건너뛸 때: (1) 그 봇 목록에 스킬이 있는지(`skills list`, 공유 누락이 흔하다) (2) SOUL `## 스킬 먼저 로드` 표에 그 작업 유형이 있는지 (3) 대화형으로 같은 질문을 보내 `📚 Skill …`이 뜨는지. 새 SOUL 규칙은 새 스레드부터 확실히 적용된다(긴 스레드는 압축 전까지 기존 프롬프트 유지).
+- `Skill security warning … outside the trusted skills directory` (공유 스킬 로드 시 errors.log WARNING): 링크가 default `~/.hermes/skills/`로 풀려서 나는 경고다. 로드는 정상.
 - 1회성 실행(`hermes chat -q -Q`)은 스킬 프롬프트가 "아는 일엔 로드하지 말라"로 바뀐다. 자동 로드 테스트는 대화형 모드로 한다.
 
 ### 큐레이터가 기본 내장 스킬을 보관할 때
