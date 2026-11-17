@@ -497,17 +497,17 @@ with live Discord traffic). `-t skills` only: no file/terminal side effects, and
 happens in the first seconds, so don't wait for the full answer. Run it as a background job with
 notify (~40 min for 2 bots × 20 × 3). These local runs land in the bot's `state.db` as
 `source='local'` sessions — every usage metric (monitor scripts, dashboards) must filter
-`sessions.source='discord'` or the eval inflates it. Likewise any script that pipes test
-messages through the recommend hook must set `SKILL_RECOMMEND_NOLOG=1`, or its runs land in the
-hook log as real `platform=discord` turns; replays match log lines to transcripts by the logged
-`q=` hash, because near-simultaneous Discord messages swap when matched by timestamp.
-
-Bot-written skills grow until `skill_manage` rejects them at 100,000 chars (SKILL.md and each
-reference file alike); the bot then quietly trims content to fit. Watch for files over 90k and
-split losslessly: always-on rules first in SKILL.md (≤~24k, the linter threshold), verbatim
-moves into `references/` with a "read when" line each, verified by
-`~/.hermes/scripts/skill_split_check.py` (every original line kept, frontmatter identical).
-A SOUL rule "SKILL.md over 20k → append to references/, never trim" stops it recurring.
+`sessions.source='discord'` or the eval inflates it. When the eval is done, hide those sessions
+from listings/dashboards (soft archive, recoverable): `hermes -p <bot> sessions archive --source
+local --after "<eval start>" --before "<eval end>" --dry-run` → check every listed title is a
+test prompt → rerun with `--yes`; sessions still marked open need `--include-open`. Any script
+that pipes test messages through the recommend hook must set `SKILL_RECOMMEND_NOLOG=1` (see
+`references/shell-hooks.md`), or its runs land in the hook log as real `platform=discord` turns.
+Read each miss before concluding: a final-check or quick-task bot that declines an out-of-role
+request and hands it off (showing only `💡`) is behaving correctly, so score bots on questions
+inside their role. Also count `🧩` labels with no `skill_view` in that session — a fabricated label
+defeats the marker; when a SOUL rule does not stop it, add the answer-side guard plugin
+(`references/shell-hooks.md`) and offer moving that bot to a stronger model (the user's call: cost).
 
 Discord is the claim the user cares about; CLI tests only prove the mechanism. Report the two
 separately: "applied" (files, hook log `platform=discord`, `prompt-size --platform discord`) vs
@@ -516,8 +516,13 @@ after the change, or the new SOUL phrase in that thread's stored prompt via the 
 hash join below). Open threads only pick up SOUL edits if a compaction rebuilt their prompt
 (`Compaction rebuilt a drifted system prompt` in the profile's `agent.log`) — check the stored
 prompt rather than assuming either way. Bot-authored messages are ignored by default
-(`allow_bots`), so a real Discord test needs the user to post in a NEW thread: hand them 2–3
-paste-ready messages (two should-load, one off-topic) and what you will check afterwards. New SOUL rules reach new
+(`allow_bots`), so a real Discord test needs the user to post: hand them a table (bot, paste-ready
+message, expected `🧩` line, what it proves) and say each goes as a separate NEW channel message.
+Cover: every bot not yet observed in Discord (one should-load question each), a question that
+forces a split skill to open a `references/` file, a "where would you record a new lesson in
+<skill> — location only, don't write" probe for the SOUL write rule, one off-topic message, and
+one mid-thread follow-up containing a trigger word (must load nothing). Afterwards verify from
+`state.db` (`skill_view` incl. `file_path`) and the hook log, not from the Discord text. New SOUL rules reach new
 threads; long open threads keep their stored prompt until compaction.
 
 The user wants this hook ON for every profile; it measurably turns a skipped skill into a loaded one
@@ -718,6 +723,9 @@ pin on another bot — its SOUL then applies. A quick-answers helper SOUL usuall
 file work", so add a "kanban chores assigned to you" section first (do them, stay in scope, no
 logic changes, `kanban_complete`, never `request-review`, `kanban_block` if it needs judgment).
 Never route a task that will be reviewed to the cheap bot — the review run inherits the model.
+The cheapest tier also misfits user-facing chat that must follow verification markers or
+load-first tables: run the skill trigger eval per bot before trusting it there, and when it fails,
+present "stronger model (cost) vs narrower role" as the user's decision.
 
 Reasoning effort per stage: without any task pin, each run uses its assignee profile's
 `agent.reasoning_effort` (`hermes -p <bot> config get agent.reasoning_effort`), and a review run
@@ -847,7 +855,8 @@ summarizing.
 - `references/shell-hooks.md` — per-turn context injection with `pre_llm_call` shell hooks
   (payload fields, consent allowlist on unattended gateways, live reload, platform/attachment
   filtering, fail-open, keyword-scoring precision), the skill-recommendation hook as the worked
-  example, and how to verify it reached a real Discord turn.
+  example, how to verify it reached a real Discord turn, and the answer-side
+  `transform_llm_output` plugin that strips fabricated `🧩` labels.
 - `scripts/verify_fleet.sh` — one-shot check that prompt edits are live on every profile.
 - `scripts/skill_split_check.py` — zero-loss/size/link gate for splitting an oversized skill
   (see Bot skills at the size limit).
@@ -885,6 +894,17 @@ osascript count, CPU, ERROR count since last restart, per-bot connected lines), 
 non-done tasks, venv import + one real data read, memory files grepped for old paths, disk.
 Separate "new findings" (with a proposed fix and a question) from "all green" rows, and fix your
 own stale memory entries in the same pass.
+
+After a change session ("수정한거 전체적으로 체크"), check every area you touched, in two or three
+batches, as an area → item → result table: `hooks doctor` per profile; `py_compile` of every
+script you edited; the hook eval passes AND leaves the hook log line count unchanged; each SOUL
+has the new sections once and in order; shared links resolve; locked skills not in `.archive/`;
+split checker PASS for every split skill and no skill file over 90k; dashboard repo HEAD ==
+pushed == the deployed image tag, plus the new synonyms in the served index; ops repo: run the
+snapshot sync, then `git status` must be empty (a post-commit skill edit shows up here) and the
+PII check 0; cron next-run/last-status; gateway ERROR count since the change (timestamped lines
+only); no leftover eval processes. Fix small gaps in the same pass and list what was only
+observed (e.g. bots with no Discord traffic since the change).
 
 ## Reporting to this user
 

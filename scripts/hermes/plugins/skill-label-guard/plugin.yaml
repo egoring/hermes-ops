@@ -1,0 +1,7 @@
+name: skill-label-guard
+version: 1.0.0
+description: "Remove skill names from the '🧩 스킬:' answer label that were never loaded with skill_view in this session."
+author: "local"
+provides_hooks:
+  - post_tool_call
+  - transform_llm_output

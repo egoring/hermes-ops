@@ -35,6 +35,8 @@ SCRIPTS = [
     ("hermes/skill_recommend_eval.py", "hooks/skill_recommend_eval.py"),  # 추천 회귀 + 실제 턴 재생 평가
     ("hermes/skill_trigger_eval.py", "hooks/skill_trigger_eval.py"),    # 모델 단위 스킬 자동 로드 평가 (대화형, 반복)
     ("hermes/skill_split_check.py", "scripts/skill_split_check.py"),    # 스킬 분할 무손실·크기 검사
+    ("hermes/plugins/skill-label-guard/__init__.py", "plugins-src/skill-label-guard/__init__.py"),  # 🧩 허위 표시 제거 플러그인
+    ("hermes/plugins/skill-label-guard/plugin.yaml", "plugins-src/skill-label-guard/plugin.yaml"),
 ]
 SCRIPT_DEST = REPO / "scripts"
 

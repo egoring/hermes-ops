@@ -58,12 +58,14 @@ def run_one(profile: str, qi: int, k: int) -> dict:
     out = ANSI.sub("", p.stdout)
     loaded = sorted(set(re.findall(r"📚 Skill ([\w./-]+)", out)))
     loaded = [s.rsplit("/", 1)[-1] for s in loaded]
+    claimed = re.findall(r"🧩 스킬: ?([^\n│]+)", out)  # 답변에 적은 🧩 (실제 로드 없이 적으면 허위 표시)
+    fake = bool(claimed) and not loaded
     if want is None:
         ok = not loaded
     else:
         ok = bool(set(loaded) & want)
     return {"profile": profile, "qi": qi, "run": k, "kind": "pos" if want else "neg", "q": q,
-            "loaded": loaded, "ok": ok, "sec": round(time.time() - t0, 1), "chars": len(out)}
+            "loaded": loaded, "ok": ok, "fake_label": fake, "sec": round(time.time() - t0, 1), "chars": len(out)}
 
 
 def main() -> int:
@@ -87,7 +89,8 @@ def main() -> int:
         neg = [r for r in res if r["profile"] == p and r["kind"] == "neg"]
         pr = sum(r["ok"] for r in pos) / max(len(pos), 1)
         nr = sum(not r["ok"] for r in neg) / max(len(neg), 1)
-        print(f"\n== {p}: 써야 함 로드율 {pr:.0%} (목표 80% 이상) · 쓰면 안 됨 오로드율 {nr:.0%} (목표 20% 이하)")
+        fk = sum(r.get("fake_label", False) for r in res if r["profile"] == p)
+        print(f"\n== {p}: 써야 함 로드율 {pr:.0%} (목표 80% 이상) · 쓰면 안 됨 오로드율 {nr:.0%} (목표 20% 이하) · 허위 🧩 {fk}회 (목표 0)")
         for qi in only:
             rs = [r for r in res if r["profile"] == p and r["qi"] == qi]
             if not rs:
