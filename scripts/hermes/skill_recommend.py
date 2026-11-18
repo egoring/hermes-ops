@@ -130,6 +130,7 @@ def message_text(msg) -> str:
     text = re.sub(r"\[System:.*?\]", " ", text, flags=re.S)   # 시스템 덧붙임 제외
     text = re.sub(r"\[OUT-OF-BAND USER MESSAGE[^\]]*\]|\[/OUT-OF-BAND USER MESSAGE\]", " ", text)
     text = re.sub(r"<@!?\d+>", " ", text)                     # 디스코드 멘션
+    text = re.sub(r"(?:^|(?<=\s))@?hermes_[A-Za-z0-9_.]+", " ", text)  # 이름으로 풀린 봇 멘션 (hermes_sonnet5 등)
     text = re.sub(r"^\s*\[[A-Za-z0-9_.\-]{2,32}\]\s*", "", text)  # 디스코드 화자 표시 [닉네임]
     return text.strip()[:500]
 
@@ -146,8 +147,11 @@ def tokens(text: str) -> list[str]:
     for t in re.findall(r"[a-z0-9][a-z0-9\-\.]*[a-z0-9]|[가-힣]+", text.lower()):
         if re.match(r"[가-힣]", t):
             t = strip_josa(t)
-        if len(t) >= 2 and t not in STOP and t not in out:
-            out.append(t)
+        # 파일명은 확장자도 따로 본다 (sales.csv → sales.csv, sales, csv): 확장자가 데이터 종류 신호다
+        parts = [t] + (t.rsplit(".", 1) if re.fullmatch(r"[a-z0-9\-_]+\.(csv|tsv|xlsx?|json|parquet|ipynb|py|md|docx|pptx|pdf)", t) else [])
+        for t in parts:
+            if len(t) >= 2 and t not in STOP and t not in out:
+                out.append(t)
     return out[:20]
 
 
@@ -256,6 +260,24 @@ def build_context(cands: list[dict]) -> str:
     )
 
 
+AUTO_RE = re.compile(r'\[IMPORTANT: The "([^"]+)" skill is auto-loaded\.')
+AUTO_END = ("with the terminal tool using the absolute path.", "[Skill setup note:", "or run scripts directly by absolute path")
+
+
+def split_auto_loaded(text: str) -> tuple[list[str], str]:
+    """채널 자동 로드(channel_skill_bindings)가 앞에 붙인 스킬 본문을 떼고 (스킬 이름들, 사용자 원문)을 돌려준다.
+    게이트웨이가 [payload, payload, ..., 사용자 원문]을 "\n\n"으로 이어 붙인다 (gateway/run_turn_prepare.py)."""
+    names = AUTO_RE.findall(text)
+    if not names or not text.startswith("[IMPORTANT: The \""):
+        return [], text
+    last = AUTO_RE.search(text, pos=[m.start() for m in AUTO_RE.finditer(text)][-1])
+    pos = max((text.rfind(m) for m in AUTO_END if text.rfind(m) > last.start()), default=-1)
+    if pos < 0:
+        return names, ""
+    nxt = text.find("\n\n", pos)
+    return names, (text[nxt + 2:].strip() if nxt >= 0 else "")
+
+
 def main() -> int:
     if "--refresh" in sys.argv:
         ok = fetch_index(timeout=30.0) is not None
@@ -278,7 +300,14 @@ def main() -> int:
     extra = payload.get("extra") or {}
     platform = str(extra.get("platform") or "")
     profile = str(payload.get("profile") or "")
-    text = message_text(extra.get("user_message"))
+    raw = extra.get("user_message")
+    if isinstance(raw, list):
+        raw = " ".join(x.get("text", "") for x in raw if isinstance(x, dict))
+    raw = str(raw or "")
+    # 채널 자동 로드 본문은 500자 자르기 전에 떼고 사용자 원문만 본다 (자르면 원문이 잘려 나간다).
+    # [닉네임] 은 판정용으로만 떼고, 자동 로드가 없으면 원문 그대로 message_text 로 (그쪽이 한 번만 뗀다)
+    auto, rest = split_auto_loaded(re.sub(r"^\s*\[[A-Za-z0-9_.\-]{2,32}\]\s*", "", raw))
+    text = message_text(rest if auto else raw)
     if platform not in ALLOWED_PLATFORMS:
         log(f"skip platform={platform} profile={profile}")
         return 0
@@ -299,11 +328,12 @@ def main() -> int:
     if not index:
         log(f"no index platform={platform} profile={profile}")
         return 0
-    cands = score_all(index, text, profile, strict=not first)[:TOP_N]
+    cands = [c for c in score_all(index, text, profile, strict=not first)
+             if c["name"] not in auto][:TOP_N]  # 이미 자동 로드된 스킬은 다시 추천하지 않는다
     ms = round((time.perf_counter() - t0) * 1000)
     # q= 정제된 질문의 지문 (평가 재생이 대화 기록과 정확히 짝짓게), first= 첫 턴 여부
     log(f"platform={platform} profile={profile} {ms}ms cands={[(c['name'], c['score']) for c in cands]} "
-        f"first={int(first)} q={qhash(text)}")
+        f"first={int(first)} q={qhash(text)}" + (f" auto={auto}" if auto else ""))
     if cands:
         print(json.dumps({"context": build_context(cands)}, ensure_ascii=False))
     return 0
