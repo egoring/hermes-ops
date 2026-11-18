@@ -37,6 +37,8 @@ SCRIPTS = [
     ("hermes/skill_split_check.py", "scripts/skill_split_check.py"),    # 스킬 분할 무손실·크기 검사
     ("hermes/plugins/skill-label-guard/__init__.py", "plugins-src/skill-label-guard/__init__.py"),  # 🧩 허위 표시 제거 플러그인
     ("hermes/plugins/skill-label-guard/plugin.yaml", "plugins-src/skill-label-guard/plugin.yaml"),
+    ("hermes/plugins/channel-skill-autoload/__init__.py", "plugins-src/channel-skill-autoload/__init__.py"),  # 채널 자동 로드 우회
+    ("hermes/plugins/channel-skill-autoload/plugin.yaml", "plugins-src/channel-skill-autoload/plugin.yaml"),
 ]
 SCRIPT_DEST = REPO / "scripts"
 

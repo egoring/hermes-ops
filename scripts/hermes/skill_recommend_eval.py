@@ -16,7 +16,11 @@ H = os.path.expanduser("~/.hermes")
 HOOK = H + "/hooks/skill_recommend.py"
 
 # (프로필, 첫 턴?, 질문, 반드시 포함 | None=추천 없어야 함)
+_AUTO = "[someuser] [IMPORTANT: The \"code-review\" skill is auto-loaded. Follow its instructions for this session.]\n\n# code-review\n\nx x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x \n\n[Skill directory: /s/code-review]\nResolve any relative paths in this skill (e.g. `scripts/foo.js`, `templates/config.yaml`) against that directory, then run them with the terminal tool using the absolute path.\n\n"  # 채널 자동 로드(channel_skill_bindings) 머리말
 CASES = [
+    # 채널 자동 로드: 본문을 떼고 원문으로 판정, 이미 로드된 스킬은 다시 추천 안 함, 봇 이름 멘션 무시
+    ("coder-bot", True, _AUTO + "hermes_sonnet5 동료가 올린 PR 리뷰하려는데 확인할 항목 정리해줘", "github-code-review"),  # code-review 자체는 이미 로드 → 제외
+    ("coder-bot", True, _AUTO + "처음 받은 매출 CSV 데이터 품질 점검 순서 알려줘", "explore-data"),
     ("coder-bot", True, "처음 받은 매출 CSV 데이터 품질 점검 순서 알려줘", "explore-data"),
     ("coder-bot", True, "이 데이터셋 결측치랑 이상치 확인해줘", "explore-data"),
     ("coder-bot", True, "두 그룹 차이가 통계적으로 유의한지 봐줘", "statistical-analysis"),

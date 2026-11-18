@@ -99,6 +99,12 @@ installed+shared profiles, Korean→English synonyms):
   `documentation`); keep stems only when ≥5 chars (`profil`, `statistic`, `validat`).
 - Filter to skills the profile can actually load (own folder + shared dirs from its
   `skills.external_dirs`), or bots get told about skills they can't open.
+- A real question that lands only ONE specific word ("…컬럼이 뭐가 있고 빈 값이…") correctly gets no
+  candidate; don't lower the 2-hit floor for it — that brings back the common-word noise. Add the
+  synonym anyway (it fires once a second domain word appears) and let the SOUL load-first table
+  carry such turns. Check a miss with `--explain` before blaming the model: `tokens:` with no score
+  lines means the floor, not a missing skill. Before a Discord test, `--explain` each test message
+  so a predicted `cands=[]` isn't reported as a hook regression.
 - Test set before shipping: ~20 expectation cases (should-recommend incl. paraphrases, small talk
   and near-misses that must return nothing, first-turn and mid-thread variants), plus a replay of
   every logged REAL Discord turn comparing "candidates then vs now". Keep both in one script
@@ -145,13 +151,31 @@ sonnet bots had 0 such labels. Fix the label mechanically, and move user-facing 
   `HERMES_HOME` does not identify the bot. Keep the source in one place and re-copy on change.
 - `hermes -p <bot> plugins enable <name>` writes `plugins.enabled` and the running gateway reloads
   plugins live ("Gateway reloaded plugins — active in the running gateway now"); no restart.
-  Confirm with `plugins list` (Source `user`, enabled).
+  Confirm with `plugins list` (Source `user`, enabled). After editing an already-enabled plugin's
+  code, `enable` only says "already enabled" and nothing reloads — re-copy, then `plugins disable`
+  + `plugins enable` per profile and look for the "Gateway reloaded plugins" line.
 - Unit-test the rewrite as a pure function (partial strip, full strip + following blank line,
   untouched when all loaded, path-style `cat/name`, bold `**🧩 스킬:**`, `💡` line kept, exception →
   `None`), then verify on stored final answers in `state.db` and the plugin's own log — the CLI
   screen shows the streamed pre-transform text, so an eval parsing stdout still counts the fakes.
   Weak models often put the honest `🧩` in the interim message that carries the tool call, so a
   final answer without `🧩` is not a lost label.
+
+## Channel auto-load (`channel_skill_bindings`) and these hooks
+
+The gateway rewrites the first message of a bound channel's session as
+`[IMPORTANT: The "<skill>" skill is auto-loaded. Follow its instructions for this session.]` +
+skill body + `[Skill directory: …]` note (repeated per skill), then `\n\n` + the user's text.
+- The recommend hook's `[IMPORTANT` skip prefix would drop that whole turn. Split it first: names
+  from the `auto-loaded` markers; user text = after the first `\n\n` following the last payload end
+  marker (`…with the terminal tool using the absolute path.`, `[Skill setup note:`, or the
+  supporting-files `skill_view(...)` line). Score only the user text, drop auto-loaded names from
+  candidates, log `auto=[…]`.
+- The `🧩` guard must count auto-loaded skills as loaded, or it strips honest labels: register
+  `pre_llm_call` (kwargs `session_id, user_message, conversation_history, is_first_turn, …`) and
+  record the marker names. `transform_llm_output` gets no user message, and the current turn is
+  not in `state.db` yet, so a DB lookup alone misses it.
+- Tell the bots in SOUL that an auto-loaded skill they followed goes in the `🧩` line.
 
 ## Removing a hook
 

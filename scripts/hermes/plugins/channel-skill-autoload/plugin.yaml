@@ -1,0 +1,6 @@
+name: channel-skill-autoload
+version: 1.0.0
+description: "Workaround: apply Discord channel_skill_bindings on new threads (v0.23.0 _is_new_session bug)."
+author: "local"
+provides_hooks:
+  - pre_gateway_dispatch

@@ -17,7 +17,7 @@ in this file is verified against process state, logs, or the kanban DB instead.
 
 | Layer | Path | Reaches the bot |
 |---|---|---|
-| Bot identity / role | `~/.hermes/profiles/<bot>/SOUL.md` | **only after gateway restart** |
+| Bot identity / role | `~/.hermes/profiles/<bot>/SOUL.md` | next NEW session, no restart (verified on v0.23 multiplex: an edit at 22:06 was in a 23:21 Discord session's stored prompt with no restart between); open threads keep their stored prompt |
 | Project rules | `<project>/AGENTS.md` | next session, no restart. Kanban workers (cwd = board `default_workdir`) get it in the system prompt. A chat turn gets it in the system prompt **only if the profile's `terminal.cwd` is the project dir**; unset, the gateway cwd is `$HOME` and AGENTS.md arrives lazily as `[Subdirectory context discovered: …]` inside the first tool result touching the project, so the first reply is written without it |
 | One-off instruction | kanban task body | immediately |
 
@@ -228,6 +228,16 @@ The multiplex re-scan on a `config.yaml`/`.env` change only ADDS missing adapter
 already-connected bot keeps its old Discord gates (log: `Re-scanned profile '<bot>' … (0
 adapter(s) connected)`). After changing a connected bot's `discord.*` settings, run
 `hermes -p <bot> gateway restart` and confirm a fresh `✓ discord connected (profile: <bot>)`.
+
+Prefer per-bot restarts over `hermes gateway restart` whenever work may be in progress: the full
+host shutdown runs `process_registry.kill_all`, which kills EVERY bot's tracked background job
+(e.g. a thread's hours-long submission-status poll), while a per-profile restart leaves them
+running. Preflight in one batch: non-done kanban tasks per board + `pgrep -fl "work kanban
+task"`, per-bot message count in the last 10 min and the last message's role/source,
+`gateway_state.json` `active_agents` (1 = your own desktop chat), and background jobs
+(`profiles/*/processes.json` + `pgrep -fl` for long loops; `owner_task_id` maps a PID to its
+thread). Restart idle bots first and the busy one last; after each, `kill -0 <job pid>` and the
+ERROR count since the restart (timestamped lines only).
 Adapter-level settings (mention gating, allow_bots) then apply to existing threads too; SOUL does
 not (below).
 
@@ -251,8 +261,11 @@ injecting events — stop that thread rather than escalating to a kill.
 2. Set it through the CLI, never by hand-editing: `hermes -p <bot> config set model.default <model-id>`.
    Use a model id you can verify (current session's model, provider catalog) — an invalid id
    fails silently at request time, not at set time. Leave `reasoning_effort` alone unless asked.
-3. Restart (needs user approval): `hermes gateway restart` when multiplexed (all bots
-   reconnect — say so), else `hermes -p <bot> gateway restart`. Check the bot's running kanban
+3. Restart: under the multiplexed gateway a `model.default` edit is picked up by the profile
+   re-scan (`Re-scanned profile '<bot>' after config/.env change`) for NEW sessions without a
+   restart — prove it from `sessions.model` of the bot's next new Discord session (and of local
+   eval sessions started after the edit), not from the re-scan line. Restart only if that still
+   shows the old id (`hermes -p <bot> gateway restart`, approval). Before any restart check the bot's running kanban
    work first with `hermes kanban --board <board> show <task_id>`
    (status + latest `[run N]` events) instead of assuming — tasks finish or get closed by the user
    between turns. Kanban workers are separate processes launched by the dispatcher-owning gateway,
@@ -518,10 +531,18 @@ hash join below). Open threads only pick up SOUL edits if a compaction rebuilt t
 prompt rather than assuming either way. Bot-authored messages are ignored by default
 (`allow_bots`), so a real Discord test needs the user to post: hand them a table (bot, paste-ready
 message, expected `🧩` line, what it proves) and say each goes as a separate NEW channel message.
+Write each mention as the bot's Discord APP name (e.g. `@hermes_sonnet5`), not the profile name —
+the user picks from autocomplete, and app names can still carry an old model name after a model
+switch (only the user can rename the app in the developer portal; suggest it). Before judging
+results, confirm which profile received each test (`sessions.origin_json` → `profile`,
+`parent_chat_id` for the channel); a misrouted mention looks like a feature failure.
 Cover: every bot not yet observed in Discord (one should-load question each), a question that
 forces a split skill to open a `references/` file, a "where would you record a new lesson in
 <skill> — location only, don't write" probe for the SOUL write rule, one off-topic message, and
-one mid-thread follow-up containing a trigger word (must load nothing). Afterwards verify from
+one mid-thread follow-up containing a trigger word (must load nothing). Keep test messages
+side-effect free: a "write a README/초안" prompt makes some bots save a real file into their cwd —
+add "본문으로만, 파일은 만들지 마" or "위치만, 쓰지 마", and after the run `find <bot cwd> -newermt
+"<test start>" -type f -not -path '*/.git/*'`, moving leftovers to `~/.Trash`. Afterwards verify from
 `state.db` (`skill_view` incl. `file_path`) and the hook log, not from the Discord text. New SOUL rules reach new
 threads; long open threads keep their stored prompt until compaction.
 
@@ -560,6 +581,10 @@ Split (bot-owned skills need the user's OK):
    overview, then `## References` listing every file with a "read when …" condition. Detail moves
    verbatim into topical `references/` (extend an existing topic file before creating one), one
    level deep, `## Contents` atop reference files over 100 lines, frontmatter byte-identical.
+   When the skill records a rule the project later relaxed (a ban with a newer exception track in
+   AGENTS.md), the SKILL.md summary must restate the exception's conditions from AGENTS.md (scope,
+   licence/approval gates, who decides) — "the recorded exception is X" alone reads as permission —
+   and the old ban, kept verbatim for the checker, gets a one-line scope note above it.
 3. Gate: `python3 scripts/skill_split_check.py <profile> <name> <backup dir>` must print PASS —
    every non-empty original line (old SKILL.md + old references) still present, size, frontmatter,
    every reference linked. Run it on the untouched skill first to prove it reports 0 missing.
@@ -817,7 +842,9 @@ summarizing.
 
 - `references/kanban-review-loop.md` — making implementer→reviewer handoff actually route.
 - `references/discord-bot-plumbing.md` — mentions, tokens, profile/account mapping, tagging a
-  second bot in another bot's thread (allow_bots / thread_require_mention), and "bot isn't
+  second bot in another bot's thread (allow_bots / thread_require_mention), domain channels
+  ("split skills by coding/competition/design": keep role bots, what Hermes can scope per
+  channel/project, `channel_skill_bindings` + `allowed_channels` setup and tests), and "bot isn't
   answering" triage (adapter fatal/retry, inbound check, dead OAuth login, quiet hours, recurring
   disconnect correlation).
 - `references/scheduled-alerts.md` — zero-token cron alerts, edge-triggered notification, the
@@ -927,7 +954,10 @@ numbers in the table — including correcting an earlier estimate that the new d
 numbers (PIDs, byte counts, HTTP codes) rather than "it should work now". Never report a
 check as passed from `$?` after a pipe (`cmd | tail -5; echo rc=$?`) — that is the last
 command's status, so a crashed `tsc`/test run reads as rc=0; run the check unpiped, or use
-`set -o pipefail` / `${PIPESTATUS[0]}`, and read its own output for the pass line. When you were wrong
+`set -o pipefail` / `${PIPESTATUS[0]}`, and read its own output for the pass line. Make scripted
+edits to configs/sources with the patch tool or Python `replace` + `assert t.count(old)==1`, not
+`sed -i ''`: a sed pattern that misses (Korean text, YAML quoting) exits 0 and the following
+commit/deploy runs on an unchanged file. When you were wrong
 earlier in the session, say so plainly in one line and correct it — do not quietly restate.
 
 When a delete/disable instruction could refer to more than one pending thing (a feature, a

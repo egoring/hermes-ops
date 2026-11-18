@@ -83,6 +83,64 @@ gates in the adapter defaults before saying it just works:
 Both are adapter settings: apply with `hermes -p <bot> gateway restart` (a config re-scan does not
 rebuild a connected adapter); they then hold in existing threads as well.
 
+## Domain channels and channel-bound skills ("스킬을 나누고 싶다")
+
+When the user wants coding/competition/design split, keep the bots split by ROLE and split the
+domain by workspace/channel instead: domain bots lose the opus-design → sonnet-build → opus-review
+cross-check (or need domains × roles bots) and pin one model to all of a domain's work. Measure
+first — if the trigger eval shows ~0% false loads, mixing is not hurting answers and the gain is
+organization only; say so.
+
+What Hermes can scope (check the code of the installed version before promising more):
+
+| Mechanism | Config | Effect | Limit |
+|---|---|---|---|
+| Project skills | `<git root>/.hermes/skills/` + `skills.trusted_project_dirs` | listed only when the session cwd's git root is trusted; override same-named profile skills | bots with `terminal.cwd` = that root see them in every Discord turn; nested repos are their own root |
+| Channel auto-load | `discord.channel_skill_bindings: [{id: '<channel>', skills: [a, b]}]` | skill bodies prepended to the FIRST message of every new session in that channel (threads inherit via parent id) | pushes, never hides; costs the full SKILL.md tokens on every new session there |
+| Platform hide | `skills.platform_disabled.<platform>` | hide per platform | no per-channel visibility |
+| Per channel | `channel_overrides` (model, provider, system_prompt), `channel_prompts` | | no cwd, no skill list |
+
+There is no per-channel skill visibility. Channel auto-load alone is the usual answer: bind 1–2
+small, broadly useful skills (a few k chars, e.g. code-review + testing-strategy for a coding
+channel), leave big project skills to on-demand loading.
+
+Setup for a new domain channel:
+1. User creates the channel and gives the id (right-click → Copy Channel ID).
+2. Back up every bot `config.yaml`. In EACH bot add the id to `discord.allowed_channels`
+   (comma-separated string) — otherwise the bot silently ignores the channel — and add the
+   `channel_skill_bindings` entry. Re-parse with `yaml.safe_load` to confirm.
+3. Confirm every bound skill resolves in every bot (`HERMES_HOME=<profile>` + venv
+   `tools.skills_tool.skill_view(<name>)` → `success`); a missing one only logs
+   `Auto-skill '<x>' not found`.
+4. Make hooks/plugins tolerate the auto-load prefix (see `shell-hooks.md` → Channel auto-load).
+5. Gates are adapter settings: a config re-scan does not rebuild connected adapters, so if the bot
+   ignores the new channel, `hermes -p <bot> gateway restart` per bot (approval) and look for
+   `Auto-loaded skill(s) [...]` in `gateway.log` on the first test message.
+   If the bot answers in the channel but neither `Auto-loaded skill(s)` nor `Auto-skill '<x>' not
+   found` appears, the loader never ran: either the event lost `auto_skill` or the gateway did not
+   treat the session as new (`created_at == updated_at` check in `run_turn_prepare`). Don't guess
+   from code — drop a temporary probe plugin into each bot (`pre_gateway_dispatch` logging
+   `event.auto_skill` + `source.chat_id/parent_chat_id`, `pre_llm_call` logging whether
+   `user_message` holds the `auto-loaded` marker; enable live, no restart), have the user send one
+   message, read the probe log, then disable and delete the probe.
+   Known cause on v0.23.0 (still on upstream main): `session_authority._reserve_route` calls
+   `get_or_create_session` at admission, then turn prep calls it again and touches `updated_at`, so
+   `_is_new_session` is never true and bindings never load. Workaround plugin (no core patch,
+   live-enable, no restart): `pre_gateway_dispatch` → when `event.auto_skill` is set and
+   `source.auto_thread_created` is true, call `gateway._hmwa_auto_load_skills(event, skills, "",
+   key)` (same payload format as native), then set `event.auto_skill = None` so a future upstream
+   fix cannot double-inject. It covers fresh-mention threads only (`/new` inside a thread gets
+   nothing). Source kept in `~/.hermes/plugins-src/channel-skill-autoload/`.
+6. "Bot didn't see my question" with no `inbound message` line: read the channel through the
+   bot's token (`GET /channels/<id>/messages`, token never printed) and check each message's
+   `mentions`. Discord's autocomplete offers each bot's managed ROLE under the same name; a role
+   mention (`<@&role_id>`, empty `mentions`) never passes `require_mention` (the adapter has no
+   role/mention_patterns support), and picking a sibling bot sends everything to it. Give the user
+   paste-ready raw user mentions `<@bot_user_id>` per bot in test tables instead of names.
+7. User tests: in the new channel one should-load question per bound skill, one question needing
+   an extra unbound skill (auto-load must not block other loads), and the same question in the old
+   channel (no auto-load there).
+
 ## "The bot isn't answering" — triage order
 
 Work from the gateway outward. Each step rules a layer in or out:

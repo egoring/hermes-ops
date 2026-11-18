@@ -23,6 +23,7 @@ PROFILE_HOME = Path(__file__).resolve().parents[2]  # <profile>/plugins/skill-la
 LOG = PROFILE_HOME / "logs" / "skill_label_guard.log"
 LABEL = re.compile(r"^(\s*(?:\*\*)?🧩\s*스킬\s*(?:\*\*)?\s*[:：]\s*)(.+?)\s*$")
 _loaded: dict[str, set[str]] = {}
+AUTO_RE = re.compile(r'\[IMPORTANT: The "([^"]+)" skill is auto-loaded\.')
 
 
 def _norm(name: str) -> str:
@@ -57,6 +58,18 @@ def _on_post_tool_call(tool_name: str = "", args=None, result=None, session_id: 
     return None
 
 
+def _on_pre_llm_call(session_id: str = "", user_message=None, conversation_history=None, **_kw):
+    """채널 자동 로드로 받은 스킬을 기억한다 (이번 턴 사용자 메시지 + 앞선 대화 기록)."""
+    try:
+        texts = [user_message] + [m.get("content") for m in (conversation_history or []) if isinstance(m, dict) and m.get("role") == "user"]
+        for t in texts:
+            if isinstance(t, str) and "skill is auto-loaded" in t:
+                _loaded.setdefault(session_id, set()).update(_norm(n) for n in AUTO_RE.findall(t))
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _db_loaded(session_id: str) -> set[str]:
     db = PROFILE_HOME / "state.db"
     if not session_id or not db.is_file():
@@ -64,6 +77,9 @@ def _db_loaded(session_id: str) -> set[str]:
     out: set[str] = set()
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
     try:
+        # 채널 자동 로드(channel_skill_bindings)로 받은 스킬도 실제 로드다 — 첫 사용자 메시지 앞머리에 붙는다
+        for (um,) in con.execute("select content from messages where session_id=? and role='user' and content like '[IMPORTANT: The %skill is auto-loaded%'", (session_id,)):
+            out |= {_norm(n) for n in AUTO_RE.findall(um or "")}
         for (tc,) in con.execute("select tool_calls from messages where session_id=? and tool_calls like '%skill_view%'", (session_id,)):
             for x in json.loads(tc or "[]"):
                 f = x.get("function") or {}
@@ -119,5 +135,6 @@ def _on_transform(response_text=None, session_id: str = "", **_kw):
 
 
 def register(ctx) -> None:
+    ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_hook("transform_llm_output", _on_transform)
