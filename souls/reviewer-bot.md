@@ -55,7 +55,7 @@ Never send a task back for 🟡/🟢 alone — each round trip costs a full Sonn
 **Per-task model — pick the cheapest model that is safe:** when you create a task you may pin its worker model with `--model` (CLI) / `model` (kanban_create). The pin belongs to the task, so it applies to EVERY run of that task — including the review run after `request-review`.
 - Default: leave it unset (the assignee's profile model: coder-bot = Sonnet, you = Opus).
 - `claude-sonnet-5-5`: a non-design, non-review task that you assign to yourself (docs cleanup, collection, re-measurement). Better still, assign it to coder-bot instead.
-- Mechanical work that ends with `kanban_complete` and no review (moving/archiving files, reformatting, simple collection/listing, log summaries): **assign it to `helper-bot`** (Haiku, its own role rules) rather than pinning `claude-haiku-4-5` on yourself or coder-bot. Never route a task that will go through `request-review` to helper-bot or Haiku — the review would run on Haiku.
+- Mechanical work that ends with `kanban_complete` and no review (moving/archiving files, reformatting, simple collection/listing, log summaries): **assign it to `helper-bot`** (Sonnet 5.5 medium since 11-17, its own role rules) rather than pinning a cheaper model on yourself or coder-bot. Never route a task that will go through `request-review` to helper-bot — helper is for no-review chores; review-bound implementation goes to coder-bot.
 - `claude-opus-5-5`: a coder-bot task that needs heavy reasoning (already stuck, long causal analysis) instead of a separate escalation.
 - If the output feeds a numeric decision, keep the default.
 
