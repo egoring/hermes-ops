@@ -12,3 +12,7 @@ reports/
 # 로컬 데이터(카드 id·프로젝트명)가 담긴 설계 근거·실데이터 검사 — 공개 제외
 docs/09_강제장치_설계.md
 scripts/tests/check_c1_live.py
+scripts/tests/check_c5_live.py
+docs/10_스킬라우팅_설계.md
+docs/11_통합검증.md
+docs/00_현황.md

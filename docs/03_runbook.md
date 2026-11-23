@@ -237,6 +237,7 @@ lock하면 에이전트가 그 스킬을 고치지 못한다(읽기·자동 로�
 | # | 기준 | 임계값 | 확인 명령 |
 ## 합격 명령
 ```bash
+# 줄 끝 숫자 = 기대 종료 코드(exit code). 출력값이 아니다(R11 ②)
 <명령 1>            # expect: 0
 <명령 2>            # expect: 0
 ```
@@ -259,6 +260,134 @@ lock하면 에이전트가 그 스킬을 고치지 못한다(읽기·자동 로�
 ```
 
 - ① 리뷰 반려 상한은 **2회**(U3, 11-20 결정). 봇 SOUL의 "[round N/3]" 문구는 사용자가 SOUL을 고칠 때 함께 바뀐다(그 전까지 SOUL은 3).
-- ② `## 합격 명령` 블록의 줄 끝 `# expect: N`은 기대 종료 코드다(없으면 0).
+- ② `## 합격 명령` 블록 줄 끝의 `# expect: N`은 **그 명령의 기대 종료 코드(exit code)**다(없으면 0). 출력값이나 출력 줄 수가 아니다. 개수를 확인하려면 비교를 명령 안에 넣는다: 일치 0줄 확인은 `! grep -q '<패턴>' <파일>   # expect: 0`, 정확한 개수는 `test "$(grep -c '<패턴>' <파일>)" -eq 3   # expect: 0`. `grep -c`·`wc -l`처럼 숫자를 출력하는 명령 끝에 `# expect: <숫자>`만 붙이지 않는다(11 통합 검증 T6: `grep -Ec … # expect: 0`을 '출력 0'으로 읽어 카드가 막혔다). 줄은 반드시 `# expect: N`으로 끝난다(evidence-gate는 줄 끝만 읽는다). 설명은 블록 안의 `#` 주석 줄에 쓴다(evidence-gate는 `#`로 시작하는 줄을 명령으로 세지 않는다).
 - ③ coder는 `metadata.verification=[{cmd, exit_code, result}]`를 마지막 수정 뒤 이 세션에서 실행한 그대로 적는다(evidence-gate가 활성화되면 기계로 대조, D24).
 - ④ reviewer가 만드는 coder 카드부터 이 양식이 의무다(U5).
+- ⑤ 프로필 `.env`(시험 프로필 포함)는 **사람이 쓴다.** 워커가 write_file 가드를 스크립트로 돌아가 `.env`를 쓰는 방식은 금지한다. 필요하면 카드에 내용을 적고 kanban_block으로 사람에게 넘긴다(11-21 통합 검증 K1에서 itest `.env`를 스크립트로 덮어쓴 건은 사후 승인).
+
+## R12. 평가 운영 (09 §5·§6.3)
+
+> 코드·테스트·실행 파일은 `~/.hermes/evals/`에 만들어져 있고 **cron 등록은 0건, 활성화 전**이다(사용자 결정 11-21: 전체 구현 → 통합 검증 → 한 번에 활성화). 이 절의 등록 명령은 활성화 때 사용자가(또는 승인받은 reviewer가) 쓴다. 평가 LLM은 평가 전용 키만 쓴다(D25·D26).
+
+### 12.1 구성요소
+
+| 구성 | 파일 | 하는 일 | 주기(KST) | cron 이름 (실행 파일) | 인터프리터 | LLM |
+|---|---|---|---|---|---|---|
+| A + 주간 보고 | `~/hermes-ops/scripts/kanban_metrics.py`, `eval_compare.py`, `~/.hermes/evals/bin/eval_weekly_report.py` | 6절 보고서를 `reports/<주>.md`에 쓰고 요약을 `quiet_hours.emit()`으로 알린다 | 월 09:40 | `eval-weekly-report` (`eval_weekly_report.sh`) | `/opt/anaconda3/bin/python3` | 0 |
+| B0 스냅샷 | `eval_snap.py` | 리뷰 요청 때의 문서 상태를 `snap/`에 저장 | 2분마다 | `eval-snap` (`eval_snap.sh`) | `/opt/anaconda3/bin/python3` | 0 |
+| B(i) 코드 검사 | `eval_kchecks.py` | K1~K8을 `b/k_checks.jsonl`에 창별로 쌓음(같은 창은 교체, 35일 보관) | 매일 04:30 | `eval-kchecks` (`eval_kchecks.sh`) | `/opt/anaconda3/bin/python3` | 0 |
+| B(ii) 판정 제출 | `eval_judge.py --submit` (J1 → J2), `eval_llm.py`, `eval_guard.py` | 지난 주 표본·반려를 Message Batches로 제출 | 매일 03:00 | `eval-judge-submit` (`eval_judge_submit.sh`) | `~/.hermes/hermes-agent/venv/bin/python`(SDK) | 평가 키 |
+| B(ii) 판정 수거 | `eval_judge.py --collect` | 끝난 배치를 `b/j1/<주>.jsonl`·`b/j2/<주>.jsonl`과 장부에 씀 | 매시 정각 | `eval-judge-collect` (`eval_judge_collect.sh`) | `~/.hermes/hermes-agent/venv/bin/python`(SDK) | 평가 키 |
+| C 스킬 효과 + J3 | `eval_c_run.py`, `eval_c_report.py` | 고정 문제 ON/OFF 시행 → `c/results/<run>/` | 수동(cron 없음) | — | `~/.hermes/hermes-agent/venv/bin/python` | 평가 키 |
+| 트리거 회귀 | `skill_trigger_eval.py` | 합성 질문에서 스킬 로드 확인 → `trigger/<시각>.jsonl` | 수동 | — | 같음 | 평가 키 |
+| 판정기 보정 | `eval_calib.py` | 라벨 CSV 추출·합의율·κ·합격 판정 | 수동 | — | `/opt/anaconda3/bin/python3` | 0 |
+| 키 점검 | `check_key.py` | 평가 키 형식·모델 조회·최소 호출 1회 | 수동 | — | `~/.hermes/hermes-agent/venv/bin/python` | 평가 키(약 $0.0001) |
+| 야간 실패 알림 보류·방출 | `eval_cron_quiet.py` | 4개 작업 래퍼가 23~09시에 실패하면 알림 대신 `quiet_hold/eval-cron-fail.jsonl`에 보류하고(30건 상한), 09:05에 한 번에 낸다 | 매일 09:05 | `eval-alert-flush` (`eval_alert_flush.sh`) | `/opt/anaconda3/bin/python3` | 0 |
+
+실행 파일은 `~/.hermes/evals/cron/*.sh` 6개(권한 755)다. `eval_snap.sh`·`eval_kchecks.sh`·`eval_judge_submit.sh`·`eval_judge_collect.sh`는 첫 줄에서 `eval_cron_quiet.py run`으로 자기를 다시 실행한다: 23~09시에 0이 아닌 종료면 실패 내용을 보류하고 종료 코드 0으로 끝나며(stdout `QUIET_HELD …`), 그 밖 시간에는 종료 코드를 그대로 낸다. `eval_judge_submit.sh`·`eval_judge_collect.sh`는 J1 다음 J2를 부르고, 429·overloaded(종료 코드 3)면 J2를 건너뛰고 그 코드로 끝난다.
+
+### 12.2 활성화 순서 (사람이 한다)
+
+1. 실행 파일을 reviewer 프로필 `scripts/`로 복사한다. 작업은 그 프로필의 `scripts/` 안 파일만 실행하기 때문이다(`~/.hermes/hermes-agent/cron/scheduler_script.py:323-366`). `.sh`는 bash로 돈다(같은 파일 `:408`).
+```bash
+for n in snap kchecks judge_submit judge_collect weekly_report alert_flush; do cp ~/.hermes/evals/cron/eval_$n.sh ~/.hermes/profiles/reviewer-bot/scripts/; done
+ls -l ~/.hermes/profiles/reviewer-bot/scripts/eval_*.sh   # 6개, -rwxr-xr-x
+```
+2. cron을 등록한다. 저장소는 프로필마다 따로다(`~/.hermes/profiles/reviewer-bot/cron/jobs.json`, `cron/jobs.py:85-95`). `--no-agent`이면 스크립트 stdout이 그대로 알림이 되고 stdout이 비면 조용하다(`hermes_cli/subcommands/cron.py:58-66`, `cron/scheduler.py:1504-1553`). `<알림 대상>`은 기존 `no_agent` 작업과 같은 값을 쓴다(`hermes -p reviewer-bot cron list`로 `deliver` 확인).
+   - **알림이 가는 작업은 주간 보고와 `eval-alert-flush`(야간 실패 보류분 방출) 둘뿐이다.** `eval-snap`·`eval-kchecks`·`eval-judge-submit`·`eval-judge-collect`는 정상 실행에도 요약을 stdout에 쓰고(매시 수거 요약, 2분마다 스냅샷 줄 등), `touch STOP` 중에는 판정 래퍼 둘이 `STOP`을 stdout에 쓴다. 이대로 `--deliver "$D"`로 걸면 23~09시를 포함해 밤낮없이 Discord로 간다. 그래서 이 4개는 `--deliver local --failure-deliver "$D"`로 건다: 성공 실행의 stdout은 알림 대신 `~/.hermes/profiles/reviewer-bot/cron/output/<job_id>/<시각>.md`에만 남고(`cron/scheduler.py:3067-3073`, `cron/jobs.py:3353-3364`; 작업마다 기본 최근 50개만 보관, `cron/jobs.py:3323-3328`), 실패(0이 아닌 종료)만 `$D`로 간다(`cron/scheduler_delivery.py:863-882`, `hermes_cli/subcommands/cron.py:44-53`).
+   - 주간 보고는 `--deliver "$D"`다. 알림은 보고서가 `quiet_hours.emit()`으로 내므로 23~09시에는 보류된다.
+   - 실패 알림도 23~09시에는 가지 않는다: 4개 작업 래퍼가 그 시간의 실패를 `quiet_hours.emit()`으로 보류하고 종료 코드 0으로 끝난다(cron 실패 알림은 `quiet_hours`를 거치지 않기 때문, `cron/scheduler.py:1535-1542`). 보류분은 `eval-alert-flush`(매일 09:05, `--deliver "$D"`)가 한 번에 낸다. 보류는 30건까지이고 넘은 건수는 방출 때 한 줄로 적힌다. `quiet_hours.py`를 읽지 못하면 래퍼는 종료 코드를 그대로 낸다(알림을 잃지 않는 쪽).
+```bash
+D="<알림 대상>"
+hermes -p reviewer-bot cron create "every 2m"   --name eval-snap          --script eval_snap.sh          --no-agent --deliver local --failure-deliver "$D" --timezone Asia/Seoul
+hermes -p reviewer-bot cron create "30 4 * * *" --name eval-kchecks       --script eval_kchecks.sh       --no-agent --deliver local --failure-deliver "$D" --timezone Asia/Seoul
+hermes -p reviewer-bot cron create "0 3 * * *"  --name eval-judge-submit  --script eval_judge_submit.sh  --no-agent --deliver local --failure-deliver "$D" --timezone Asia/Seoul   # 보정 통과 뒤에만
+hermes -p reviewer-bot cron create "0 * * * *"  --name eval-judge-collect --script eval_judge_collect.sh --no-agent --deliver local --failure-deliver "$D" --timezone Asia/Seoul
+hermes -p reviewer-bot cron create "40 9 * * 1" --name eval-weekly-report --script eval_weekly_report.sh --no-agent --deliver "$D" --timezone Asia/Seoul
+hermes -p reviewer-bot cron create "5 9 * * *"  --name eval-alert-flush   --script eval_alert_flush.sh   --no-agent --deliver "$D" --timezone Asia/Seoul
+```
+3. 확인한다. 등록 직후 `next_run_at`이 채워지고(`cron/jobs.py:1914-1921`), 첫 실행 뒤 `last_run_at`·`last_status`가 적힌다(`cron/jobs.py:2398-2404`). 마지막 실행·다음 실행은 주간 보고 사용량 절의 "평가 cron" 표에도 나온다.
+```bash
+hermes -p reviewer-bot cron list | grep -c 'Name: *eval-'   # 활성화 날 5(eval-judge-submit 제외), 보정 통과 뒤 6. 기존 작업 9개는 그대로
+hermes -p reviewer-bot cron runs <eval-snap의 job_id> --limit 3   # 3분 안에 첫 실행 기록 (job_id는 list에서 복사)
+```
+4. `next_run_at`이 비거나 첫 실행 기록이 생기지 않을 때만 R3 5번(워커 0 확인)을 한 뒤 사용자가 `hermes gateway restart`를 한다. cron ticker는 60초마다 돌고(`cron/jobs.py:105`) 매 tick이 `jobs.json`을 다시 읽으므로(`cron/jobs.py:1377, 2868`) 정상이면 재시작이 필요 없다.
+
+일정 문법 근거: `"every 2m"`은 2분 interval, 5칸 식(`"30 4 * * *"`)은 cron, 요일·시각 문구(`"every monday 9:40am"`)도 같은 cron으로 풀린다(`cron/jobs.py:787-852`, 소스 함수를 직접 불러 확인). 정각 매시는 `"0 * * * *"`다. 6개를 한 번에 등록하지 않아도 된다: `eval-snap`과 `eval-kchecks`는 C6 승인 직후, `eval-judge-submit`은 보정 통과 뒤, `eval-weekly-report`는 C10 승인 뒤가 09 §7의 순서다.
+
+### 12.3 멈춤
+
+- LLM 구성요소만 즉시 0으로: `touch ~/.hermes/evals/STOP`. J1·J2 제출·수거, C 묶음, J3가 클라이언트·subprocess·장부 0으로 끝난다. A·B0·B(i)·주간 보고는 계속 돈다. 풀기: `rm ~/.hermes/evals/STOP`. STOP 중 `eval-judge-submit`·`eval-judge-collect` 래퍼는 종료 코드 0으로 끝나며 stdout에 `STOP`을 쓰지만, 두 작업은 `--deliver local`이라 Discord로 가지 않는다(12.2).
+- cron 전체: `hermes -p reviewer-bot cron pause <job_id>` / `resume <job_id>` (`<job_id>`는 `cron list`).
+- 429·overloaded: 그 실행이 종료 코드 3으로 멈추고 남은 일은 다음 주기에 다시 돈다. 0이 아닌 종료는 cron이 오류 알림으로 `$D`에 보낸다(`cron/scheduler.py:1505`). 23~09시의 실패는 보류됐다가 09:05 `eval-alert-flush`가 낸다(12.2). 주간 보고 사용량 절의 "그 주 halt" 횟수와 맞추어 본다.
+
+### 12.4 비용
+
+- 콘솔 월 상한 **$200**(사용자가 콘솔에서 설정), 내부 안전선 **$180**(상한 × `soft_stop_ratio` 0.9, `~/.hermes/evals/evals.yaml`). 월 누적 + 예상 비용이 안전선을 넘으면 새 제출을 다음 순서로 줄인다: C 남은 시행 → J1 표본 100 → 50 → 0 → J2. A·B0·B(i)·보고는 사용량이 0이라 멈추지 않는다.
+- 장부 `~/.hermes/evals/ledger.jsonl`은 SDK 응답의 실제 usage를 적는다. Sonnet 5.5 단가는 가정값이라 줄마다 `cost_basis: assumed`로 남고, 주간 보고가 그 금액 비율을 적는다. 단가표에 없는 모델은 `unknown_price`(비용 0)로 적히고 보고서가 줄 수를 따로 적는다.
+- 월 $ 누적과 $200 대비 %는 주간 보고 `## 사용량·상한`에서 본다. 달 경계는 KST다.
+
+### 12.5 평가 키
+
+- 키는 `~/.hermes/evals/.env`의 `HERMES_EVAL_ANTHROPIC_API_KEY`에만 둔다(권한 600). 봇용 `~/.hermes/.env`와 섞지 않고, 이 파일을 열어 값을 보거나 채팅에 적지 않는다.
+- 점검: `~/.hermes/hermes-agent/venv/bin/python ~/.hermes/evals/bin/check_key.py` (형식, 봇 키와 다른 키인지, 모델 3종 조회, 최소 호출 1회).
+
+### 12.6 보정 (판정기 J1·J2)
+
+- 주기: 첫 보정은 B0 스냅샷을 켠 지 2주 뒤, 이후 8주마다와 판정 모델·루브릭을 바꿀 때. 매월 무작위 10건을 사용자가 다시 판정해 합의율이 기준 아래로 떨어지면 즉시 다시 한다.
+- 합격 기준과 사람 몫은 09 §5.5(회당 약 45분). 순서는 `eval_calib.py` 하위 명령 기준이다.
+```bash
+python3 ~/.hermes/evals/bin/eval_calib.py extract --kind j1 --until <KST 시각> --seed <N> --out <labels.csv>   # j2도 같다
+#  → reviewer가 prelabel_reviewer 열을 채운다
+python3 ~/.hermes/evals/bin/eval_calib.py plan --kind j1 --labels <labels.csv> --models claude-opus-5-5,claude-sonnet-5-5 --repeats 2 --dry-run   # 개수·예상 비용만
+#  → 판정 실행(reviewer, 사용자 승인 뒤)이 judge 열을 채운다. J1은 opus·sonnet 둘 다 돌린다
+python3 ~/.hermes/evals/bin/eval_calib.py review-list --labels <labels.csv> --seed <N> --out <review.csv>      # 판정기와 어긋난 것 전부 + 무작위 20건
+#  → 사용자가 label_user 열을 채운다
+python3 ~/.hermes/evals/bin/eval_calib.py metrics --kind j1 --labels <labels.csv> --model <모델> --json        # 합격 판정
+```
+- `review-list`는 judge 열이 채워진 뒤에 부른다. 비어 있으면 전부 어긋난 것으로 세어 전체가 사용자에게 간다(`eval_calib.py` `user_review_list`).
+- J1 모델은 두 모델의 `metrics` 결과를 `choose_j1_model`(`eval_calib.py:506`: 합격한 쪽 중 합의율이 높은 쪽, 차이 0.005 미만이면 sonnet)로 정해 `evals.yaml`의 `j1_model`에 적는다.
+- **상태 파일은 사람이 쓴다**(도구가 쓰지 않는다): `metrics`가 합격이면 `~/.hermes/evals/b/calib/j1_status.json`을 `{"pass": true, "model": "<모델>", "checked_at": "<KST 시각>"}`로 만든다(J2는 `j2_status.json`). 주간 보고는 `pass`가 JSON `true`일 때만 "보정 통과"로 읽고, 그 밖(파일 없음·`false`·문자열)은 절 첫 줄에 `미보정 — 판정·결정에 쓰지 않는다`를 붙인다.
+
+### 12.7 변경 기록부 (`~/.hermes/evals/changes.yaml`)
+
+- 쓰는 사람: 설정을 바꾼 사람(사용자 또는 바꾼 작업을 한 봇). 쓰는 때: **바꾼 날 같은 날**. 시간 비교의 창을 이 기록으로 자르므로 빠지면 앞뒤 창에 다른 변경이 섞인다.
+- 항목 칸: `at`(ISO 8601, `+09:00` 필수, 시각 오름차순), `profile`(`coder-bot`·`reviewer-bot`·`helper-bot`·`fable-bot`·`all`), `kind`(`effort`·`model`·`soul`·`skill`·`plugin`·`guard`·`rule`·`hermes`), `note`, `ref`(결정 번호 또는 카드).
+- 쓴 뒤 검사: `python3 ~/hermes-ops/scripts/eval_compare.py --validate-changes ~/.hermes/evals/changes.yaml` (오류 0이어야 한다).
+- 주간 보고 A 절은 뒤 창(변경 + 14일)이 그 주에 끝나는 변경마다 층화 비교(Δ·90% CI·판정)를 싣는다. 단순 Δ는 참고로만 적힌다.
+
+### 12.8 C 스킬 효과 실행
+
+- 대상: 봇 × 스킬 중 실사용 로드율(K5, 지난 4주)이 **10% 이상이고 맞는 세션이 20개 이상**인 쌍만(09 §5.7.2). 나머지는 "판정 불가(로드율)".
+- 순서: 그 봇의 **A/A(ON vs ON) 48시행을 먼저** 한 번 돌려 잡음 폭을 잰다(모델·SOUL·effort가 바뀔 때마다 다시). 그다음 ON/OFF 48시행(문제 8 × 3회 × 2).
+```bash
+~/.hermes/hermes-agent/venv/bin/python ~/.hermes/evals/bin/eval_c_run.py --bot <봇> --skill <스킬> --arms on,on --reps 3 --dry-run   # 계획만(쓰기 0)
+~/.hermes/hermes-agent/venv/bin/python ~/.hermes/evals/bin/eval_c_run.py --bot <봇> --skill <스킬> --arms on,on --reps 3            # A/A
+~/.hermes/hermes-agent/venv/bin/python ~/.hermes/evals/bin/eval_c_run.py --bot <봇> --skill <스킬> --arms on,off --reps 3           # ON/OFF
+# 두 묶음이 끝난 뒤: 보고서 파일을 만든다(각 묶음이 끝에 `결과 <경로>/trials.jsonl`을 찍는다). stdlib만 쓰므로 인터프리터는 이것이다.
+R=~/.hermes/evals/c/results
+/opt/anaconda3/bin/python3 ~/.hermes/evals/bin/eval_c_report.py --trials $R/<ON/OFF run_id>/trials.jsonl --aa $R/<A/A run_id>/trials.jsonl \
+  --load-rate <K5 로드율> --n-sessions <K5 대상 세션 수> --json > $R/<ON/OFF run_id>/report.json
+```
+- `eval_c_run.py`는 `trials.jsonl`·`summary.json`·`rerun.jsonl`만 쓰고 `report.json`을 만들지 않는다. `eval_c_report.py`는 결과를 stdout으로만 내므로 위 마지막 줄의 `> report.json`이 그 파일을 만든다. 주간 보고 C 절은 `c/results/*/report.json`만 읽으므로 이 단계를 하지 않으면 C 절이 `데이터 없음(미활성)`으로 남는다. 봇 이름은 같은 폴더의 `summary.json`에서, 스킬 이름은 `trials.jsonl`에서 읽는다.
+- `--load-rate`·`--n-sessions`는 `eval_kchecks.py`의 K5(실사용 로드율·맞는 세션 수, 주간 보고 B(i) 절 K5 표의 `로드율`과 `로드/대상`의 대상 수)다. 이 단계가 실패하면(종료 코드 2) 빈 `report.json`이 남으니 지우고 다시 한다(C 절에는 `읽지 못함`으로 나온다).
+- 병렬 1. 실행 중인 kanban 워커가 있으면 기다린다(대기 규칙은 `eval_guard.py`, C에만 적용). `STOP` 파일이면 시작하지 않는다.
+- 묶음을 돌리는 동안에는 `pytest`를 돌리지 않는다. 시작 전 `ls -A /tmp/evals/c "$TMPDIR/evals/c" "$(getconf DARWIN_USER_TEMP_DIR)evals/c"`가 모두 비어 있고 `launchctl list | grep -c 'com\.nousresearch\.hermes\.runtime\.'`가 0인지 본다(실행기도 같은 위치와 런타임 라벨을 보고, 남은 것이 있으면 종료 코드 4로 시작하지 않는다). 실행기는 시행마다 그 시행 홈의 런타임 게이트웨이를 멈추고(`gateway.pid` 확인 → SIGTERM, 20초 뒤 SIGKILL), 그 홈을 가리키는 런타임 라벨을 `launchctl remove`로 지운 뒤 시행 폴더를 지운다(최대 5회). 하나라도 실패하면 종료 코드 4로 멈춘다. `hermes gateway stop`은 쓰지 않는다(시행 홈만 멈춘다는 보장이 없다, `hermes_cli/gateway.py:5320-5367`).
+- 결과는 `~/.hermes/evals/c/results/<run_id>/`(`trials.jsonl`, `summary.json`, `rerun.jsonl`)에 남고, `report.json`은 위 `eval_c_report.py --json` 단계가 ON/OFF 폴더에 만든다. 시행마다 `state.db`와 작업 폴더가 쌓이므로 용량을 한 번 잰 뒤 이 절에 적는다. 판정표(09 §5.7.6): 유지 = Δ ≥ max(0.10, 2 × 잡음 폭)이고 CI 하한 > 0 / 해로움 = CI 상한 < 0 / 효과 없음 = Δ ≤ 0.02이고 CI 상한 < 0.10 → 보관 후보 / 그 밖 = 보류(문제 4개를 더하거나 반복 5회로 한 번 더). 조치는 모두 사용자가 정한다.
+- `skill_trigger_eval.py`(새 판)는 `~/.hermes/evals/bin/`에 있고 결과를 `~/.hermes/evals/trigger/<시각>.jsonl`에 쓴다. 원본은 `~/.hermes/hooks/`에 그대로 두고 고치지 않는다.
+
+### 12.9 E (축소 벤치) 승인 절차
+
+E는 기본 운영에 넣지 않는다. 쓰는 때: 모델·provider 교체, 에이전트 루프를 바꾼 Hermes 업데이트, A가 같은 프로젝트에서 연속 두 번 "악화"인데 B로 원인을 못 찾음, SOUL을 30% 넘게 고침. 절차: ① reviewer가 조건·가설·arm·예산·시간대를 적은 카드 초안을 올린다 → ② 사용자가 **"E 실행 승인"**이라고 명시한다 → ③ coder 카드로 벤치를 만든다 → ④ 실시간 시험이 없는 기간에 실행한다. 한 번에 coder 런 20회(약 $13 추정), 같은 월 $200 상한 안이다. 승인 없이는 만들지도 돌리지도 않는다.
+
+### 12.10 데이터 위치·보관 (`~/.hermes/evals/`)
+
+| 위치 | 내용 | 보관 |
+|---|---|---|
+| `snap/` | B0 스냅샷(런별 폴더) | 90일, 합계 2GB 초과 시 오래된 것부터 지움 |
+| `b/` | `k_checks.jsonl`(창별로 쌓임, 35일 보관), `j1/<주>.jsonl`, `j2/<주>.jsonl`, `calib/`, 배치 상태 파일 | 지우지 않는다 |
+| `reports/` | 주간 보고 `<주>.md` | 지우지 않는다 |
+| `ledger.jsonl` | 평가 LLM 호출 장부(월 누적의 원본) | 지우지 않는다 |
+| `c/` | `problems/`, `keys/`(작업 폴더 밖 정답), `results/<run_id>/` | 결과는 시행 폴더 누적 용량을 보고 정한다 |
+| `trigger/` | 스킬 트리거 회귀 결과 | 지우지 않는다 |
+| `changes.yaml`, `evals.yaml`, `prices.yaml` | 변경 기록부, 평가 설정(상한·모델), 단가표 | 사람이 고친다 |
