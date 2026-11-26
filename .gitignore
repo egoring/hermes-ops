@@ -16,5 +16,6 @@ scripts/tests/check_c5_live.py
 docs/10_스킬라우팅_설계.md
 docs/11_통합검증.md
 docs/00_현황.md
+docs/00b_인계_개발도구.md
 docs/12_A2UI_디스코드_설계.md
 docs/13_알림카드_반응_설계.md
